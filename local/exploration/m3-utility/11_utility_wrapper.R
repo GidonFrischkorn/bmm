@@ -26,8 +26,14 @@
 # Run from repo root:
 #   source("local/exploration/m3-utility/11_utility_wrapper.R")
 
-library(bmm)
 library(brms)
+
+# Load bmm via devtools during development (bmm is not yet installed as a package)
+if (requireNamespace("bmm", quietly = TRUE)) {
+  library(bmm)
+} else {
+  suppressMessages(devtools::load_all("."))
+}
 
 # ---- 0. Verify: m3(links=) works directly ------------------------------------
 #

@@ -21,6 +21,13 @@
 library(brms)
 library(dplyr)
 
+# Load bmm via devtools during development (bmm is not yet installed as a package)
+if (requireNamespace("bmm", quietly = TRUE)) {
+  library(bmm)
+} else {
+  suppressMessages(devtools::load_all("."))
+}
+
 # ==============================================================================
 # PART 0 — 2-category M3 = logistic verification
 # ==============================================================================
@@ -200,7 +207,7 @@ cat("  Random effects on all three parameters (N=30 subjects)\n\n")
 fit_binary_pt <- suppressWarnings(brm(
   binary_pt_formula,
   data    = d_binary,
-  family  = bernoulli(link = "identity"),
+  family  = bernoulli(link = "logit"),
   prior   = binary_pt_priors,
   chains  = 2L,
   iter    = 1000L,
