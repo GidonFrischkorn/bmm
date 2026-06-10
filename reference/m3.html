@@ -181,6 +181,16 @@ on the differences of these choice rules please see the appendix of Oberauer &am
 </ul></div>
 
     </div>
+    <div class="section level2">
+    <h2 id="note">Note<a class="anchor" aria-label="anchor" href="#note"></a></h2>
+    <p><strong>Bayes factor comparisons across choice rules require user-specified priors.</strong>
+Bayes factors for non-nested comparisons between an <code>m3</code> with <code>choice_rule = "simple"</code>
+and an <code>m3</code> with <code>choice_rule = "softmax"</code> are not fairly calibrated under the default
+priors, because the default priors are not matched across the two choice rules (they use
+different link functions and different prior distributions). Users who plan to compare
+models fitted with different choice rules via Bayes factors should specify their own priors
+for both models rather than relying on the defaults.</p>
+    </div>
 
     <div class="section level2">
     <h2 id="ref-examples">Examples<a class="anchor" aria-label="anchor" href="#ref-examples"></a></h2>

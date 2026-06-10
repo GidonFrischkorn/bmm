@@ -135,6 +135,16 @@ p_i = \frac{n_i \cdot A_i}{\sum^n_{j = 1} n_j \cdot A_j}
 p_i = \frac{n_i \cdot e^{A_i}}{\sum^n_{j = 1} n_j \cdot e^{A_j}}
 \]</span></p>
 <p>This choice rule can be interpreted as an n-alternative SDT model over the different response candidates with a Gumbel (or double-exponential) noise distribution.</p>
+<blockquote>
+<p><strong>Note: Bayes factor comparisons across choice rules require user-specified priors.</strong>
+Bayes factors for non-nested comparisons between an <code>m3</code> fitted with the <code>"simple"</code> choice
+rule and one fitted with the <code>"softmax"</code> choice rule are not fairly calibrated under the
+default priors. Because the two choice rules use different link functions, their default
+priors are not matched to each other, which means the marginal likelihoods are not
+comparable on equal footing. Users who plan to compare such models via Bayes factors should
+specify their own priors for both models — covering the same region of the outcome space —
+rather than relying on the defaults.</p>
+</blockquote>
 <p>Finally, the model then links the response frequencies <span class="math inline">\(Y\)</span> for each response category to the probabilities <span class="math inline">\(p\)</span> using a multinomial distribution with the total number of trials:</p>
 <p><span class="math display">\[
 Y \sim multinomial(p, trials)
