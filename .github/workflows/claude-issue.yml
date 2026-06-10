@@ -1,0 +1,109 @@
+name: Claude issue agent
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: claude-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  claude:
+    # Gate: exact label + sender allowlist. Merges stay human-only via the
+    # protect-develop ruleset (1 approving review, thom-more cannot self-approve).
+    if: >
+      github.event.label.name == 'assign-tm' &&
+      contains(fromJSON('["GidonFrischkorn"]'), github.actor)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      R_KEEP_PKG_SOURCE: yes
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.BOT_PAT }}
+          ref: develop
+          fetch-depth: 0
+
+      - uses: r-lib/actions/setup-pandoc@v2
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+          use-public-rspm: true
+
+      # Mirrors R-CMD-check.yaml: cmdstanr is not on CRAN, so install hard
+      # dependencies only (NA) and add the needed Suggests explicitly.
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          dependencies: NA
+          extra-packages: |
+            any::devtools
+            any::testthat
+            any::waldo
+            any::fansi
+            any::withr
+            any::dplyr
+            any::posterior
+            any::tidybayes
+            any::ggplot2
+            any::mixtur
+            any::stringr
+            stan-dev/cmdstanr
+
+      - name: Build Cmdstan
+        run: |
+          cmdstanr::check_cmdstan_toolchain(fix = TRUE)
+          cmdstanr::install_cmdstan(cores = parallel::detectCores())
+        shell: Rscript {0}
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.BOT_PAT }}
+          label_trigger: "assign-tm"
+          bot_name: "thom-more"
+          bot_id: "${{ vars.THOM_MORE_ID }}"
+          base_branch: "develop"
+          branch_prefix: "claude/issue-"
+          settings: |
+            {
+              "attribution": { "commit": "", "pr": "" },
+              "permissions": {
+                "allow": [
+                  "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)",
+                  "Bash(git add:*)", "Bash(git commit:*)", "Bash(git checkout:*)",
+                  "Bash(git branch:*)", "Bash(git push:*)",
+                  "Bash(gh pr create:*)", "Bash(gh pr view:*)",
+                  "Bash(gh issue view:*)", "Bash(gh issue comment:*)",
+                  "Bash(Rscript:*)", "Bash(R:*)",
+                  "Bash(ls:*)", "Bash(cat:*)", "Bash(grep:*)", "Bash(find:*)", "Bash(wc:*)"
+                ],
+                "deny": [
+                  "Bash(git push origin develop:*)",
+                  "Bash(git push origin master:*)",
+                  "Bash(gh pr merge:*)",
+                  "Bash(pip install:*)", "Bash(pip3 install:*)", "Bash(npm install:*)",
+                  "Bash(curl:*)", "Bash(wget:*)"
+                ]
+              }
+            }
+          prompt: |
+            Work GitHub issue #${{ github.event.issue.number }} in this repository
+            (bmm, an R package; the default branch is develop).
+            Follow the conventions in CLAUDE.md. Loop internally: implement, run
+            `Rscript -e 'devtools::test()'`, fix failures, and re-run until the
+            suite is green. If you changed roxygen comments, also run
+            `Rscript -e 'devtools::document()'`. Then commit on your branch and
+            open a pull request to develop that references the issue. Do not
+            merge. If blocked, comment on the issue describing what you tried,
+            then stop.
+          claude_args: |
+            --max-turns 50
