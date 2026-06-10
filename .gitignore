@@ -20,7 +20,8 @@ inst/doc
 
 # Local / private directories
 .claude/
-local/
+local/*
+!local/exploration
 bmm-dev
 
 # Internal test artifacts
