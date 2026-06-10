@@ -335,16 +335,76 @@ can account for it.
 
 ---
 
-# 5  Recommendation
+# 5  Parameter Recovery
 
-## 5.1  Go/no-go summary
+**Source:** `05_parameter_recovery.R`
 
-| Extension | Identifiability | Design requirement | Verdict |
+Both prototypes were fitted on simulated data with known true parameters using
+brms 2.23.0 / CmdStan 2.39.0 (2 chains × 1000 iter, 500 warmup).
+
+## 5.1  Prototype A: EU activation
+
+**Design:** VDR with alternating high ($V = 2$) and low ($V = 1$) value trials,
+$N = 30$ subjects × 80 trials, $n = (1, 4, 5)$ items.
+
+| Parameter | True | Estimate | 95% CI |
 |---|---|---|---|
-| **Prototype A: EU activation** ($\gamma$) | High | VDR design with 2+ value levels | **GO** |
-| **Prototype B: Prelec weighting** ($\alpha$) | Conditional | Variable option counts required | **CONDITIONAL GO** |
+| $a$ | 1.50 | 1.487 | [1.398, 1.584] |
+| $c$ | 2.00 | 1.998 | [1.966, 2.026] |
+| $\gamma$ | 0.80 | 0.803 | [0.774, 0.831] |
 
-## 5.2  Prototype A: recommended for implementation
+All three parameters recovered within their 95% credible intervals.
+Max $\hat{R} = 1.003$ (excellent convergence).
+
+**Key result:** $\gamma$ is recovered with high precision and is clearly
+distinguishable from zero (95% CI does not include 0). The EU extension is
+identifiable and well-behaved in the VDR design.
+
+## 5.2  Prototype B: Prelec weighting
+
+**Design:** Mixed set-size ($n_{\text{other}} \in \{2, 6\}$, alternating),
+$N = 30$ subjects × 100 trials.
+
+| Parameter | True | Estimate | 95% CI |
+|---|---|---|---|
+| $a$ | 1.50 | 1.504 | [1.447, 1.561] |
+| $c$ | 2.00 | 1.990 | [1.923, 2.056] |
+| $\alpha$ | 0.60 | 0.600 | [0.555, 0.643] |
+
+All parameters recovered within 95% CIs. Max $\hat{R} = 1.004$.
+
+**LOO comparison** (Prelec vs null standard softmax, data generated with
+$\alpha = 0.6 \neq 1$):
+
+| Model | $\Delta$ELPD | SE |
+|---|---|---|
+| Prelec | 0.0 | 0.0 |
+| Null (softmax) | −217.8 | 21.0 |
+
+The Prelec model substantially outperforms the null when data come from a
+Prelec process, confirming that $\alpha$ carries real signal when set sizes
+vary across trials.
+
+## 5.3  Summary
+
+Both prototypes exhibit clean parameter recovery with no identifiability
+problems under their respective design requirements. The EU ($\gamma$) extension
+is the more practically relevant one because VDR designs are already common
+in the working-memory literature, while Prelec weighting requires a variable
+set-size manipulation that is unusual in standard M3 paradigms.
+
+---
+
+# 6  Recommendation
+
+## 6.1  Go/no-go summary
+
+| Extension | Identifiability | Design requirement | Recovery | Verdict |
+|---|---|---|---|---|
+| **Prototype A: EU activation** ($\gamma$) | High | VDR design with 2+ value levels | ✅ all params recovered, max $\hat{R}=1.003$ | **GO** |
+| **Prototype B: Prelec weighting** ($\alpha$) | Conditional | Variable option counts required | ✅ $\alpha$ recovered, $\Delta$ELPD=218 vs null | **CONDITIONAL GO** |
+
+## 6.2  Prototype A: recommended for implementation
 
 **Conclusion: GO — but as a predictor, not a structural change.**
 
@@ -365,7 +425,7 @@ vignette or a dedicated test showing how to specify a VDR analysis with
 demonstrating the VDR analysis, and a mention in the `m3` documentation
 that value-modulated activation is supported.
 
-## 5.3  Prototype B: conditional go pending design support
+## 6.3  Prototype B: conditional go pending design support
 
 **Conclusion: CONDITIONAL GO — only if the target application has
 variable option counts.**
@@ -391,7 +451,7 @@ requirement before exposing the option to users.
 **Recommended action:** defer until a concrete use case with variable
 option counts arises.
 
-## 5.4  API sketch (if Prototype B is implemented)
+## 6.4  API sketch (if Prototype B is implemented)
 
 ```r
 # New choice_rule option
@@ -424,4 +484,5 @@ Parameter table entry for `prelec` version:
 | `02_prototype_a_eu.R` | EU-activation prototype + brms model spec + identifiability |
 | `03_prototype_b_prelec.R` | Prelec weighting prototype + brms model spec + null model |
 | `04_axiom_simulations.R` | IIA, regularity, transitivity, set-size, similarity checks |
+| `05_parameter_recovery.R` | Actual brms/CmdStan fits + parameter recovery for Prototypes A and B |
 | `README.qmd` | This document (renders to HTML or PDF via Quarto) |
