@@ -28,7 +28,7 @@ jobs:
       ((github.event_name == 'issues' && github.event.label.name == 'assign-tm') ||
        (github.event_name != 'issues' && contains(github.event.comment.body, '@thom-more')))
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 150
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes
@@ -121,7 +121,7 @@ jobs:
             }
           prompt: >-
             ${{ github.event_name == 'issues' &&
-            format('Work GitHub issue #{0} in this repository (bmm, an R package; the default branch is develop). Follow the conventions in CLAUDE.md. Loop internally: implement, run Rscript -e "devtools::test()", fix failures, and re-run until the suite is green. If you changed roxygen comments, also run Rscript -e "devtools::document()". Then commit on your branch and open a pull request to develop that references the issue. Do not merge. If blocked, comment on the issue describing what you tried, then stop.', github.event.issue.number) || '' }}
+            format('Work GitHub issue #{0} in this repository (bmm, an R package; the default branch is develop). Follow the conventions in CLAUDE.md. Commit and push your branch as soon as you have a first meaningful unit of work, then keep committing and pushing incrementally — never hold work back until the end, because the run can be cut off by a turn limit. Open a draft pull request to develop referencing the issue right after the first push and update it as you go; mark it ready for review when done. If the issue is labeled "exploration", all code belongs under local/exploration/ and must not modify R/ or inst/ — verify your scripts run instead of running the full test suite. Otherwise loop internally: implement, run Rscript -e "devtools::test()", fix failures, and re-run until the suite is green; if you changed roxygen comments, also run Rscript -e "devtools::document()". Do not merge. If blocked, comment on the issue describing what you tried, then stop.', github.event.issue.number) || '' }}
           claude_args: |
-            --max-turns 50
+            --max-turns 150
             --append-system-prompt "Project memory is checked out at .claude-memory/projects/-Users-gidonfrischkorn-Documents-GitHub-bmm/memory/. Read INDEX.md and MEMORY.md there before working and consult the listed topic docs (especially feedback_guardrails.md) as needed. Never commit anything under .claude-memory/."
