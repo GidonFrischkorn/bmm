@@ -58,7 +58,15 @@ jobs:
             any::stringr
             stan-dev/cmdstanr
 
+      - name: Cache Cmdstan
+        id: cmdstan-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cmdstan
+          key: cmdstan-${{ runner.os }}-r-release-v1
+
       - name: Build Cmdstan
+        if: steps.cmdstan-cache.outputs.cache-hit != 'true'
         run: |
           cmdstanr::check_cmdstan_toolchain(fix = TRUE)
           cmdstanr::install_cmdstan(cores = parallel::detectCores())
