@@ -1,0 +1,427 @@
+---
+title: "Extending the M3 toward Utility-Theory Choice Models"
+subtitle: "Exploration report — bmm issue #7"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    embed-resources: true
+  pdf:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+source("01_formal_mapping.R", echo = FALSE)
+```
+
+# 1  Formal mapping: M3 choice rules and utility theory
+
+## 1.1  Softmax M3 = Multinomial Logit / Random-Utility Model
+
+The softmax choice rule maps category activations $a_i$ and option counts $n_i$
+to choice probabilities via:
+
+$$
+P(i) = \frac{n_i \exp(a_i)}{\sum_j n_j \exp(a_j)}
+$$
+
+This is exactly the **Multinomial Logit (MNL)** model, also called the
+**Luce choice rule** with exponential strengths.  It admits a clean
+random-utility derivation: if
+
+$$
+U_i = a_i + \ln n_i + \varepsilon_i, \quad \varepsilon_i \overset{\text{iid}}{\sim} \text{Gumbel}(0, 1),
+$$
+
+then $P(\arg\max_i U_i = i) = P(i)$ above.  The script
+`01_formal_mapping.R` verifies this numerically; the simulated
+$(n = 200{,}000)$ probabilities match the analytic formula to within
+sampling error.
+
+**Temperature.**  The softmax temperature $\tau$ (noise scale) is implicit
+in the *scale* of the activation parameters $a_i$: rescaling all
+activations by $1/\tau$ is equivalent to increasing the Gumbel noise
+scale from 1 to $\tau$.  As $\tau \to 0$ (or equivalently, as activation
+contrasts grow), choices become deterministic; as $\tau \to \infty$,
+choices become uniform.
+
+## 1.2  Simple rule M3 = Luce (1959) ratio rule
+
+The simple choice rule uses linear (ratio-scale) activations:
+
+$$
+P(i) = \frac{(a_i + b)\, n_i}{\sum_j (a_j + b)\, n_j}
+$$
+
+where the background noise $b = 0.1$ (fixed) ensures all strengths are
+positive.  This is Luce's (1959) original **ratio rule**, with strength
+$s_i = (a_i + b)\,n_i > 0$.  The log link on $a_i$ in the simple rule
+ensures $a_i > 0$ before adding $b$.
+
+## 1.3  Temperature and scale-invariance: where M3 diverges from vNM
+
+Von Neumann–Morgenstern (vNM) utility functions are unique up to a
+**positive affine transformation**:
+
+$$
+U' = \alpha U + \beta, \quad \alpha > 0.
+$$
+
+The M3 rules satisfy weaker invariances:
+
+| | Shift $U + \beta$ | Scale $\alpha U$ | vNM |
+|---|---|---|---|
+| **Softmax** | invariant ✓ | **not** invariant | both required |
+| **Simple**  | **not** invariant | invariant ✓ | both required |
+
+The softmax M3 is *interval-scale* (shift-invariant); the simple rule is
+*ratio-scale* (scale-invariant).  Neither achieves the full affine class
+of vNM.  The code in `01_formal_mapping.R` verifies these properties
+numerically.
+
+**Practical implication.**  In the softmax M3, the *absolute* scale of
+activations is substantively meaningful (it encodes decisiveness /
+inverse temperature), unlike vNM utilities.  The identification constraint
+$b = 0$ pins the location of the scale; the activation contrasts determine
+the slope.  This is *useful* for cognitive modelling (it quantifies
+randomness in memory retrieval) but means that talking about "utility" in
+the strict vNM sense requires an additional link between $a_i$ and outcome
+utilities.
+
+## 1.4  Independence of Irrelevant Alternatives (IIA)
+
+Both M3 rules satisfy IIA.  For the softmax:
+
+$$
+\frac{P(i)}{P(j)} = \frac{n_i \exp(a_i)}{n_j \exp(a_j)},
+$$
+
+which depends only on alternatives $i$ and $j$, not on any other
+alternative $k$.  An analogous argument holds for the simple rule.
+
+**IIA limitation for WM modelling.**  IIA means that adding more "other"
+items to a memory set steals probability from "correct" and "npl"
+proportionally.  Debreu's (1960) similarity effect suggests that
+*similar* alternatives (near-duplicates) should steal mainly from each
+other.  Both M3 rules cannot represent this.  For designs where item
+similarity within a category varies, a nested-logit or elimination-by-aspects
+model would be required.
+
+---
+
+# 2  Prototype A — payoff-modulated activation (Expected Utility)
+
+**Source:** `02_prototype_a_eu.R`
+
+## 2.1  Model
+
+The standard softmax M3 in a simple-span task has:
+
+$$
+a_i^{\text{corr}} = b + a + c, \quad a_i^{\text{other}} = b + a, \quad a_i^{\text{npl}} = b.
+$$
+
+The EU extension adds an **expected-value term** $\gamma V_i$ to each
+category's activation:
+
+$$
+a_i^{\text{corr}} = b + a + c + \gamma V_{\text{corr}}, \quad
+a_i^{\text{other}} = b + a + \gamma V_{\text{other}}, \quad
+a_i^{\text{npl}} = b,
+$$
+
+where $V_i$ is the point value associated with the items in category $i$
+(e.g., 1 or 2 points in a VDR design).  The parameter $\gamma$ captures
+how much utility-weighting modulates category activation.
+
+This is mathematically equivalent to adding $\gamma V_i$ as an additive
+predictor in the log-linear predictor of the softmax, which means:
+
+$$
+P(i) \propto n_i \exp(a_i + \gamma V_i) = n_i \exp(a_i) \cdot \exp(\gamma V_i).
+$$
+
+For $\gamma > 0$, categories whose items have higher value attract
+disproportionately more responses.
+
+## 2.2  brms specification
+
+The full brms NLF formula (from `02_prototype_a_eu.R`):
+
+```r
+eu_formula <- bf(
+  Y | trials(nTrials) ~
+    Idx_corr * (corr + log(n_corr)) + (1 - Idx_corr) * (-100),
+  nlf(muother ~ Idx_other * (other + log(n_other)) + (1 - Idx_other) * (-100)),
+  nlf(munpl   ~ Idx_npl   * (npl   + log(n_npl))   + (1 - Idx_npl)   * (-100)),
+  nlf(corr  ~ b + a + c + gamma * V_corr),
+  nlf(other ~ b + a     + gamma * V_other),
+  nlf(npl   ~ b),
+  b + a + c + gamma ~ 1,
+  nl = TRUE
+)
+```
+
+Stan code is generated successfully from `make_stancode()` (verified in
+the script).  The formula maps cleanly onto the existing bmm multinomial
+NLF infrastructure — this extension requires no custom Stan code.
+
+## 2.3  Identifiability
+
+$\gamma$ is identified if and only if $V_i$ varies across trials.  In
+a design where all trials have the same value assignment, $\gamma V_i$
+is absorbed into the intercept of $a$ or $c$.  A **VDR design** with at
+least two distinct value levels (e.g., 1 point vs 2 points) satisfies
+this requirement.
+
+The predicted effect is shown below (from `02_prototype_a_eu.R`):
+
+| $\gamma$ | $V_{\text{corr}}$ | $P(\text{correct})$ |
+|---|---|---|
+| 0 | 2 | 0.591 |
+| 0 | 1 | 0.591 |
+| 0.5 | 2 | 0.723 |
+| 0.5 | 1 | 0.504 |
+| 1.0 | 2 | 0.820 |
+| 1.0 | 1 | 0.396 |
+
+## 2.4  Relationship to existing bmm API
+
+The EU extension requires no structural API change: it is equivalent to
+including $V_i$ as a predictor in the activation sub-formula of the
+`bmmformula`:
+
+```r
+bmf(
+  correct ~ b + a + c,
+  other   ~ b + a,
+  npl     ~ b,
+  c     ~ 1 + (1 | subj),
+  a     ~ 1 + value + (1 | subj)   # 'value' is the point-value predictor
+)
+```
+
+The EU reading of this model is that $\gamma$ (the slope of `value`)
+measures utility-weighting of memory activation.  No new model
+constructor is needed; existing `m3()` with `version = "ss"` already
+supports this via the custom activation formula.
+
+---
+
+# 3  Prototype B — non-EU choice rule (Prelec probability weighting)
+
+**Source:** `03_prototype_b_prelec.R`
+
+## 3.1  Model
+
+The Prelec (1998) one-parameter weighting function transforms objective
+probabilities $p$ into subjective decision weights:
+
+$$
+w(p) = \exp\!\bigl(-(-\ln p)^\alpha\bigr), \quad \alpha > 0.
+$$
+
+$\alpha = 1$: identity ($w(p) = p$, equivalent to standard softmax).
+$\alpha < 1$: inverse S-shape — rare alternatives overweighted.
+$\alpha > 1$: S-shape — common alternatives overweighted.
+
+In the M3 context, the standard softmax uses $\ln n_i$ as the option-count
+adjustment.  Replacing this with the log Prelec weight of the proportion
+$p_i = n_i / N_{\text{total}}$ gives:
+
+$$
+P(i) \propto \exp\!\Bigl(a_i + \ln w(p_i)\Bigr) = \exp\!\Bigl(a_i - (-\ln p_i)^\alpha\Bigr).
+$$
+
+For $\alpha = 1$: $\ln w(p_i) = \ln p_i = \ln n_i - \ln N_{\text{total}}$,
+which reduces to standard softmax up to a constant absorbed into the intercept.
+
+## 3.2  brms specification
+
+```r
+prelec_formula <- bf(
+  Y | trials(nTrials) ~
+    Idx_corr  * (corr  + (-((-log(p_corr))^alpha)))  + (1-Idx_corr) *(-100),
+  nlf(muother ~ Idx_other*(other + (-((-log(p_other))^alpha))) + (1-Idx_other)*(-100)),
+  nlf(munpl   ~ Idx_npl  *(npl   + (-((-log(p_npl))^alpha)))   + (1-Idx_npl)  *(-100)),
+  nlf(corr ~ b + a + c), nlf(other ~ b + a), nlf(npl ~ b),
+  b + a + c + alpha ~ 1,
+  nl = TRUE
+)
+```
+
+$p_{\text{corr}}, p_{\text{other}}, p_{\text{npl}}$ are precomputed
+data columns ($n_i / N_{\text{total}}$).  Stan code parses successfully
+(verified with `make_stancode()`).
+
+## 3.3  Identifiability
+
+$\alpha$ is identified only when option *proportions* $p_i$ vary across
+trials.  In a **fixed-set-size design** (all trials have the same $n_i$),
+the Prelec weights are trial-constant and $\alpha$ is not identified
+(absorbed into activation intercepts).
+
+Designs that identify $\alpha$:
+
+- Mixed set-size conditions (e.g., 2 vs 6 "other" items)
+- Experiments with variable distractor counts across blocks
+
+In **typical complex-span and simple-span paradigms**, set size is constant
+within a trial block, so $\alpha$ would not be identified.
+
+Predicted effect of $\alpha$ on $P(\text{correct})$ for $n = (1, 4, 5)$
+(proportions $= 0.10, 0.40, 0.50$):
+
+| $\alpha$ | $P(\text{corr})$ | $P(\text{other})$ | $P(\text{npl})$ |
+|---|---|---|---|
+| 0.3 | 0.635 | 0.319 | 0.047 |
+| 0.7 | 0.500 | 0.431 | 0.069 |
+| **1.0** | **0.368** | **0.541** | **0.092** |
+| 1.5 | 0.144 | 0.724 | 0.132 |
+| 2.0 | 0.026 | 0.816 | 0.158 |
+
+For $\alpha < 1$ the rare correct item (proportion 0.10) is overweighted,
+substantially boosting $P(\text{correct})$.
+
+---
+
+# 4  Axiom violations and choice-rule comparison
+
+**Source:** `04_axiom_simulations.R`
+
+## 4.1  Axioms
+
+| Axiom | Softmax | Simple |
+|---|---|---|
+| IIA | ✓ | ✓ |
+| Regularity | ✓ | ✓ |
+| Weak stochastic transitivity | ✓ | ✓ |
+
+Both rules satisfy all three axioms.  They are members of the Luce
+random-utility family and differ only in how activation enters the
+strength function ($\exp(a_i)$ vs $a_i$).
+
+## 4.2  Where the rules differ
+
+The rules disagree on how $P(\text{correct})$ scales with the number of
+competitor items:
+
+| $n_{\text{other}}$ | Softmax $P(\text{corr})$ | Simple $P(\text{corr})$ |
+|---|---|---|
+| 1 | 0.619 | 0.544 |
+| 4 | 0.368 | 0.258 |
+| 8 | 0.239 | 0.152 |
+| 16 | 0.140 | 0.083 |
+
+The softmax predicts a shallower set-size effect than the simple rule
+for the same activation parameters.  This is directly testable: fit
+both rules to data with varying set sizes.
+
+## 4.3  IIA limitation
+
+Both rules enforce proportional stealing: adding a new alternative
+reduces all existing alternatives' probabilities proportionally.
+This conflicts with Debreu's (1960) similarity effect: near-duplicate
+competitors should mainly steal from each other.
+
+In working-memory designs, this matters when "other" items are all
+similar (same category, same valence).  If human data show
+super-proportional stealing from the "other" category when more "other"
+items are added (relative to "correct" and "npl"), neither M3 rule
+can account for it.
+
+---
+
+# 5  Recommendation
+
+## 5.1  Go/no-go summary
+
+| Extension | Identifiability | Design requirement | Verdict |
+|---|---|---|---|
+| **Prototype A: EU activation** ($\gamma$) | High | VDR design with 2+ value levels | **GO** |
+| **Prototype B: Prelec weighting** ($\alpha$) | Conditional | Variable option counts required | **CONDITIONAL GO** |
+
+## 5.2  Prototype A: recommended for implementation
+
+**Conclusion: GO — but as a predictor, not a structural change.**
+
+The EU extension reduces to adding point-value as a predictor in the
+activation sub-formula.  This:
+
+- Requires no new model constructor or choice-rule parameter
+- Is already expressible in the existing `m3()` custom version
+- Is identifiable in any VDR design
+- Has a clear cognitive interpretation ($\gamma$ = utility-weighting of
+  memory activation)
+
+The only thing needed is documentation and a worked example in the
+vignette or a dedicated test showing how to specify a VDR analysis with
+`m3(version = "custom")`.
+
+**Proposed addition:** a `local/` script (`local/eu_vdr_example.R`)
+demonstrating the VDR analysis, and a mention in the `m3` documentation
+that value-modulated activation is supported.
+
+## 5.3  Prototype B: conditional go pending design support
+
+**Conclusion: CONDITIONAL GO — only if the target application has
+variable option counts.**
+
+The Prelec extension requires a custom NLF that cannot be expressed
+through the current activation formula infrastructure (the weighting
+function modifies the *choice rule*, not the activation).  Adding it as
+a third `choice_rule = "prelec"` option in `m3()` would require:
+
+1. A new entry in `.m3_version_table` with `alpha` as an estimated
+   parameter and `log` or `identity` link
+2. A new branch in `glue_choice_rule_functions()` returning the Prelec
+   NLF expression
+3. An identifiability check in `check_model.m3_prelec` warning when
+   $n_i$ is constant across trials
+
+The Stan code is straightforward (`-((-log(p_i))^alpha)` translates
+directly).  The main risk is that in typical M3 datasets (fixed set size),
+$\alpha$ is **not identifiable**, leading to flat posteriors and
+misleading inferences.  This risk warrants a clearly documented design
+requirement before exposing the option to users.
+
+**Recommended action:** defer until a concrete use case with variable
+option counts arises.
+
+## 5.4  API sketch (if Prototype B is implemented)
+
+```r
+# New choice_rule option
+m3(
+  resp_cats   = c("corr", "other", "npl"),
+  num_options = c("n_corr", "n_other", "n_npl"),
+  choice_rule = "prelec"   # new
+)
+
+# Required: n_i / N_total must vary across trials.
+# check_model.m3 should emit a warning if this is not the case.
+```
+
+Parameter table entry for `prelec` version:
+
+```r
+.m3_version_table$ss$links$prelec <- list(c = "identity", a = "identity", alpha = "log")
+.m3_version_table$ss$priors$prelec <- list(
+  alpha = list(main = "lognormal(0, 0.5)", effects = "normal(0, 0.3)")
+)
+```
+
+---
+
+# Appendix: file index
+
+| File | Contents |
+|---|---|
+| `01_formal_mapping.R` | Numerical verification of the M3 ↔ utility-theory mapping |
+| `02_prototype_a_eu.R` | EU-activation prototype + brms model spec + identifiability |
+| `03_prototype_b_prelec.R` | Prelec weighting prototype + brms model spec + null model |
+| `04_axiom_simulations.R` | IIA, regularity, transitivity, set-size, similarity checks |
+| `README.qmd` | This document (renders to HTML or PDF via Quarto) |
