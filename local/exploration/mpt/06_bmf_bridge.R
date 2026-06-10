@@ -186,8 +186,7 @@ cat(sprintf("  Coverage: true rho IN 95%% CI? %s\n",
             rho >= ci_rho[1] & rho <= ci_rho[2]))
 
 # Max R-hat
-draws_summary <- summarize_draws(fit_corr)
-max_rhat <- max(draws_summary$rhat, na.rm = TRUE)
+max_rhat <- max(brms::rhat(fit_corr), na.rm = TRUE)
 cat(sprintf("\nMax R-hat: %.4f (should be < 1.01)\n", max_rhat))
 
 cat("\nDone.\n")

@@ -176,7 +176,7 @@ rp_ungrouped <- plogis(lrp_int - 0.5 * lrp_slope)
 
 ci <- function(x) quantile(x, c(0.025, 0.975))
 
-max_rhat <- max(summarize_draws(fit_rb)$rhat, na.rm = TRUE)
+max_rhat <- max(brms::rhat(fit_rb), na.rm = TRUE)
 
 cat("\n=== RB1988 Validation ===\n")
 cat("Expected from R&B original ML fits: cp_grouped≈0.60, rp_grouped≈0.85\n")

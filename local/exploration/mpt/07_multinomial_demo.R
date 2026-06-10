@@ -107,7 +107,7 @@ rp_hat    <- plogis(mean(draws_pcm$b_lrp_Intercept))
 cp_ci     <- plogis(quantile(draws_pcm$b_lcp_Intercept, c(0.025, 0.975)))
 rp_ci     <- plogis(quantile(draws_pcm$b_lrp_Intercept, c(0.025, 0.975)))
 
-max_rhat_pcm <- max(summarize_draws(fit_pcm)$rhat, na.rm = TRUE)
+max_rhat_pcm <- max(brms::rhat(fit_pcm), na.rm = TRUE)
 
 cat("\n=== PCM Recovery ===\n")
 cat(sprintf("cp : true = %.3f  est = %.3f  95%% CI = [%.3f, %.3f]\n",
@@ -253,7 +253,7 @@ dA_ci  <- plogis(quantile(draws_smm$b_ldA_Intercept, c(0.025, 0.975)))
 dB_ci  <- plogis(quantile(draws_smm$b_ldB_Intercept, c(0.025, 0.975)))
 gA_ci  <- plogis(quantile(draws_smm$b_lgA_Intercept, c(0.025, 0.975)))
 
-max_rhat_smm <- max(summarize_draws(fit_smm)$rhat, na.rm = TRUE)
+max_rhat_smm <- max(brms::rhat(fit_smm), na.rm = TRUE)
 
 cat("\n=== SMM Recovery ===\n")
 cat(sprintf("d_A  : true = %.3f  est = %.3f  95%% CI = [%.3f, %.3f]\n",
