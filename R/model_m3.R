@@ -133,6 +133,14 @@
 #' #### Version: `custom`
 #' `r model_info(.model_m3(version = "custom"), components = c('requirements', 'parameters', 'fixed_parameters', 'links', 'prior'))`
 #'
+#' @note **Bayes factor comparisons across choice rules require user-specified priors.**
+#'   Bayes factors for non-nested comparisons between an `m3` with `choice_rule = "simple"`
+#'   and an `m3` with `choice_rule = "softmax"` are not fairly calibrated under the default
+#'   priors, because the default priors are not matched across the two choice rules (they use
+#'   different link functions and different prior distributions). Users who plan to compare
+#'   models fitted with different choice rules via Bayes factors should specify their own priors
+#'   for both models rather than relying on the defaults.
+#'
 #' @keywords bmmodel
 #'
 #' @examplesIf isTRUE(Sys.getenv("BMM_EXAMPLES"))

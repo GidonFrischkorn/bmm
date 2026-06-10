@@ -106,6 +106,15 @@ $$
 
 This choice rule can be interpreted as an n-alternative SDT model over the different response candidates with a Gumbel (or double-exponential) noise distribution.
 
+> **Note: Bayes factor comparisons across choice rules require user-specified priors.**
+> Bayes factors for non-nested comparisons between an `m3` fitted with the `"simple"` choice
+> rule and one fitted with the `"softmax"` choice rule are not fairly calibrated under the
+> default priors. Because the two choice rules use different link functions, their default
+> priors are not matched to each other, which means the marginal likelihoods are not
+> comparable on equal footing. Users who plan to compare such models via Bayes factors should
+> specify their own priors for both models — covering the same region of the outcome space —
+> rather than relying on the defaults.
+
 Finally, the model then links the response frequencies $Y$ for each response category to the probabilities $p$ using a multinomial distribution with the total number of trials:
 
 $$

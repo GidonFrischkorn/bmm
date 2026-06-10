@@ -157,6 +157,15 @@ decision task.
 }
 }
 }
+\note{
+\strong{Bayes factor comparisons across choice rules require user-specified priors.}
+Bayes factors for non-nested comparisons between an \code{m3} with \code{choice_rule = "simple"}
+and an \code{m3} with \code{choice_rule = "softmax"} are not fairly calibrated under the default
+priors, because the default priors are not matched across the two choice rules (they use
+different link functions and different prior distributions). Users who plan to compare
+models fitted with different choice rules via Bayes factors should specify their own priors
+for both models rather than relying on the defaults.
+}
 \examples{
 \dontshow{if (isTRUE(Sys.getenv("BMM_EXAMPLES"))) withAutoprint(\{ # examplesIf}
 data <- oberauer_lewandowsky_2019_e1
