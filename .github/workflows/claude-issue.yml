@@ -39,6 +39,13 @@ jobs:
           ref: develop
           fetch-depth: 0
 
+      - name: Checkout project memory (claude-memory)
+        uses: actions/checkout@v4
+        with:
+          repository: GidonFrischkorn/claude-memory
+          token: ${{ secrets.BOT_PAT }}
+          path: .claude-memory
+
       - uses: r-lib/actions/setup-pandoc@v2
 
       - uses: r-lib/actions/setup-r@v2
@@ -117,3 +124,4 @@ jobs:
             format('Work GitHub issue #{0} in this repository (bmm, an R package; the default branch is develop). Follow the conventions in CLAUDE.md. Loop internally: implement, run Rscript -e "devtools::test()", fix failures, and re-run until the suite is green. If you changed roxygen comments, also run Rscript -e "devtools::document()". Then commit on your branch and open a pull request to develop that references the issue. Do not merge. If blocked, comment on the issue describing what you tried, then stop.', github.event.issue.number) || '' }}
           claude_args: |
             --max-turns 50
+            --append-system-prompt "Project memory is checked out at .claude-memory/projects/-Users-gidonfrischkorn-Documents-GitHub-bmm/memory/. Read INDEX.md and MEMORY.md there before working and consult the listed topic docs (especially feedback_guardrails.md) as needed. Never commit anything under .claude-memory/."
