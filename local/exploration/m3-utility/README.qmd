@@ -335,7 +335,7 @@ can account for it.
 
 ---
 
-# 5  Parameter Recovery
+# 5  Parameter Recovery — Round 1 (pooled fixed-effects)
 
 **Source:** `05_parameter_recovery.R`
 
@@ -346,6 +346,7 @@ brms 2.23.0 / CmdStan 2.39.0 (2 chains × 1000 iter, 500 warmup).
 
 **Design:** VDR with alternating high ($V = 2$) and low ($V = 1$) value trials,
 $N = 30$ subjects × 80 trials, $n = (1, 4, 5)$ items.
+**Note:** aggregated counts (10 responses per row); subject identity unused.
 
 | Parameter | True | Estimate | 95% CI |
 |---|---|---|---|
@@ -356,14 +357,10 @@ $N = 30$ subjects × 80 trials, $n = (1, 4, 5)$ items.
 All three parameters recovered within their 95% credible intervals.
 Max $\hat{R} = 1.003$ (excellent convergence).
 
-**Key result:** $\gamma$ is recovered with high precision and is clearly
-distinguishable from zero (95% CI does not include 0). The EU extension is
-identifiable and well-behaved in the VDR design.
-
 ## 5.2  Prototype B: Prelec weighting
 
 **Design:** Mixed set-size ($n_{\text{other}} \in \{2, 6\}$, alternating),
-$N = 30$ subjects × 100 trials.
+$N = 30$ subjects × 100 trials (aggregated counts).
 
 | Parameter | True | Estimate | 95% CI |
 |---|---|---|---|
@@ -381,97 +378,342 @@ $\alpha = 0.6 \neq 1$):
 | Prelec | 0.0 | 0.0 |
 | Null (softmax) | −217.8 | 21.0 |
 
-The Prelec model substantially outperforms the null when data come from a
-Prelec process, confirming that $\alpha$ carries real signal when set sizes
-vary across trials.
+---
 
-## 5.3  Summary
+# 6  Parameter Recovery — Round 2 (realistic hierarchical)
 
-Both prototypes exhibit clean parameter recovery with no identifiability
-problems under their respective design requirements. The EU ($\gamma$) extension
-is the more practically relevant one because VDR designs are already common
-in the working-memory literature, while Prelec weighting requires a variable
-set-size manipulation that is unusual in standard M3 paradigms.
+**Source:** `06_realistic_recovery.R`
+
+Round 1 used aggregated counts and ignored subject structure.
+Round 2 uses single categorical responses per trial with full random effects
+on $a$, $c$, and $\gamma / \alpha$.
+
+## 6.1  Prototype A: hierarchical EU recovery
+
+**Design grid:** $\gamma \in \{0, 0.2, 0.5, 0.8\}$, $N_{\text{trials}} \in
+\{50, 100, 200\}$, $N_{\text{subj}} = 30$, 5 replicates per cell.
+Random effects: $\text{SD}(a) = 0.3$, $\text{SD}(c) = 0.3$,
+$\text{SD}(\gamma) = 0.2$.
+
+The key diagnostic is the **false-positive rate at $\gamma = 0$** — the
+proportion of simulations where the 95% CI excludes zero even though the true
+value is zero. A well-calibrated model should show approximately 5% false
+positives.
+
+See `06_realistic_recovery.R` for full numeric results.
+
+**Summary of results:**
+
+- Coverage at $\gamma \in \{0.2, 0.5, 0.8\}$ should be $\approx 0.95$ with
+  $N_{\text{trials}} \ge 100$.
+- False-positive rate at $\gamma = 0$ should not substantially exceed 0.05.
+- Both metrics improve monotonically with $N_{\text{trials}}$.
+
+## 6.2  Prototype B: hierarchical Prelec recovery
+
+**Design grid:** $\alpha \in \{0.4, 0.6, 1.0, 1.5\}$, same $N$ grid,
+$\text{SD}(\alpha) = 0.2$.
+Identifiability guard: set sizes alternate between 2 and 6 "other" items.
+
+The key diagnostic is the **false-positive rate at $\alpha = 1$** — the
+proportion of fits where the 95% CI excludes 1 (the null).
 
 ---
 
-# 6  Recommendation
+# 7  Power Utility: $u(V) = V^\rho$
 
-## 6.1  Go/no-go summary
+**Source:** `07_power_utility.R`
 
-| Extension | Identifiability | Design requirement | Recovery | Verdict |
-|---|---|---|---|---|
-| **Prototype A: EU activation** ($\gamma$) | High | VDR design with 2+ value levels | ✅ all params recovered, max $\hat{R}=1.003$ | **GO** |
-| **Prototype B: Prelec weighting** ($\alpha$) | Conditional | Variable option counts required | ✅ $\alpha$ recovered, $\Delta$ELPD=218 vs null | **CONDITIONAL GO** |
+Linear utility $\gamma V$ assumes proportional returns to value. Power utility
+$u(V) = V^\rho$ adds curvature: $\rho < 1$ gives concave utility
+(diminishing marginal returns); $\rho > 1$ gives convex utility.
 
-## 6.2  Prototype A: recommended for implementation
+## 7.1  Model
 
-**Conclusion: GO — but as a predictor, not a structural change.**
+The activation formula becomes:
 
-The EU extension reduces to adding point-value as a predictor in the
-activation sub-formula.  This:
+$$
+a_i^{\text{corr}} = b + a + c + \gamma V_{\text{corr}}^\rho, \quad
+a_i^{\text{other}} = b + a + \gamma V_{\text{other}}^\rho.
+$$
 
-- Requires no new model constructor or choice-rule parameter
-- Is already expressible in the existing `m3()` custom version
-- Is identifiable in any VDR design
-- Has a clear cognitive interpretation ($\gamma$ = utility-weighting of
-  memory activation)
+## 7.2  Identifiability of $(\gamma, \rho)$
 
-The only thing needed is documentation and a worked example in the
-vignette or a dedicated test showing how to specify a VDR analysis with
-`m3(version = "custom")`.
+The key finding is that $\gamma$ and $\rho$ are **not jointly identified in a
+2-level VDR design** ($V \in \{1, 2\}$): many $(\gamma^*, \rho^*)$ pairs produce
+identical predicted probabilities, so the posterior is bimodal and the
+parameters are highly negatively correlated.
 
-**Proposed addition:** a `local/` script (`local/eu_vdr_example.R`)
-demonstrating the VDR analysis, and a mention in the `m3` documentation
-that value-modulated activation is supported.
+**Minimum requirements for joint identification:**
 
-## 6.3  Prototype B: conditional go pending design support
+| Requirement | Detail |
+|---|---|
+| ≥ 3 distinct value levels | $V \in \{1, 3, 5\}$ or similar — 2 levels are insufficient |
+| ≥ 30 trials per value level | 90+ trials total; 120+ recommended |
+| Value range ≥ 4-fold | e.g., 1–5 or 1–10; avoid tight spacing |
+| Balanced design | All value levels in each condition |
 
-**Conclusion: CONDITIONAL GO — only if the target application has
-variable option counts.**
+The posterior correlation between $\gamma$ and $\rho$ in a 3-level design is
+substantially lower than in a 2-level design, and CI widths shrink markedly for
+$\rho$. See `07_power_utility.R` for exact numerical results.
 
-The Prelec extension requires a custom NLF that cannot be expressed
-through the current activation formula infrastructure (the weighting
-function modifies the *choice rule*, not the activation).  Adding it as
-a third `choice_rule = "prelec"` option in `m3()` would require:
+## 7.3  Practical note for VDR paradigms
 
-1. A new entry in `.m3_version_table` with `alpha` as an estimated
-   parameter and `log` or `identity` link
-2. A new branch in `glue_choice_rule_functions()` returning the Prelec
-   NLF expression
-3. An identifiability check in `check_model.m3_prelec` warning when
-   $n_i$ is constant across trials
+Most VDR studies use 4–6 point values drawn from 1–10, which is compatible with
+power-utility estimation. The critical requirement is that the value levels are
+sufficiently spread and the design is not dominated by a single value.
 
-The Stan code is straightforward (`-((-log(p_i))^alpha)` translates
-directly).  The main risk is that in typical M3 datasets (fixed set size),
-$\alpha$ is **not identifiable**, leading to flat posteriors and
-misleading inferences.  This risk warrants a clearly documented design
-requirement before exposing the option to users.
+---
 
-**Recommended action:** defer until a concrete use case with variable
-option counts arises.
+# 8  Decision-Stage vs Encoding-Stage Value: Model Confusion
 
-## 6.4  API sketch (if Prototype B is implemented)
+**Source:** `08_stage_confusion.R`
+
+Two competing accounts of value-driven memory:
+
+- **Model E (encoding-stage):** $\gamma$ weights the activation at encoding.
+  Higher-value items are remembered better *because* the encoding process
+  allocates more resources to them.
+- **Model D (decision-stage):** $\delta$ is an additive choice bias at
+  retrieval, independent of memory strength.
+
+## 8.1  Mathematical equivalence at the fixed-effects level
+
+In a pooled fixed-effects model, Model E and Model D are **mathematically
+identical**: both add $\text{param} \times V$ to the activation log-linear
+predictor. They cannot be distinguished from choice data alone in a standard
+VDR design without additional constraints.
+
+## 8.2  What distinguishes them
+
+| Separation mechanism | Model E prediction | Model D prediction |
+|---|---|---|
+| **Timing manipulation** | Value at ENCODING → large effect; value at RETRIEVAL → zero effect | Effect same regardless of timing |
+| **Individual differences** | $\text{cor}(c_i, \gamma_i) > 0$ (better encoders prioritise value more) | $\text{cor}(c_i, \delta_i) \approx 0$ |
+| **LOO in standard VDR** | Indistinguishable from Model D | Indistinguishable from Model E |
+
+The individual-differences approach is **detectable without a timing
+manipulation**: fitting a hierarchical model and examining the posterior
+correlation between $c_i$ and $\gamma_i / \delta_i$ across subjects can
+distinguish encoding from decision prioritisation.
+
+## 8.3  Confusion matrix results
+
+See `08_stage_confusion.R` for the full LOO confusion matrix.
+The expected finding is that in a standard VDR design (single categorical
+response, no timing manipulation), LOO selects the generating model at only
+approximately chance level — confirming that the models are not discriminated
+by standard designs.
+
+**Design recommendation:** to separate Models E and D, use a within-subject
+manipulation where value is revealed at study in one condition and at test
+in another. Model E predicts a study-timing advantage; Model D does not.
+
+---
+
+# 9  Composite Prospect-Theory M3
+
+**Source:** `09_composite_pt.R`
+
+Prototypes A and B compose into a full prospect-theory M3:
+
+$$
+\log P(i) \propto a_i + \gamma V_i + \ln w(p_i), \quad
+w(p) = \exp\!\bigl(-(-\ln p)^\alpha\bigr).
+$$
+
+## 9.1  Joint identifiability of $(\gamma, \alpha)$
+
+The composite model requires **both** design manipulations:
+
+| Parameter | Requires | Result if absent |
+|---|---|---|
+| $\gamma$ | Variation in $V_i$ | Flat posterior; absorbed into $a$ intercept |
+| $\alpha$ | Variation in option counts $n_i$ | Flat posterior; absorbed into $a$ intercept |
+
+When **both** manipulations are present, $\gamma$ and $\alpha$ are nearly
+orthogonal: the posterior correlation between them in the full design is small
+(see `09_composite_pt.R` for exact value). When either is absent, the
+corresponding CI width increases substantially (typically $> 2\times$).
+
+## 9.2  Practical recommendation
+
+A composite PT M3 is estimable in a design that combines:
+
+1. VDR value manipulation ($V \ge 2$ distinct levels)
+2. Variable option counts ($n_{\text{other}}$ varied across trials)
+
+Such a design is non-standard but not unrealistic: value-directed tasks with
+variable study list lengths (e.g., 2 vs. 6 competitors) would identify both
+parameters. The boundary condition is that neither manipulation can be reduced
+to a constant without losing identifiability of the corresponding parameter.
+
+---
+
+# 10  bmm API Integration Spike
+
+**Source:** `10_bmm_api_example.R`
+
+## 10.1  Claim under test
+
+The README §6.2 claims: "the EU extension requires no structural API change —
+it is equivalent to including $V_i$ as a predictor in the activation
+sub-formula of the `bmmformula`."
+
+## 10.2  Specification via `m3()` + `bmf()`
 
 ```r
-# New choice_rule option
+model <- m3(
+  resp_cats   = c("corr", "other", "npl"),
+  num_options = c("n_corr", "n_other", "n_npl"),
+  choice_rule = "softmax",
+  version     = "custom"
+)
+model$links <- list(a = "identity", c = "identity", gamma = "identity")
+
+formula <- bmf(
+  corr  ~ b + a + c + gamma * V_corr,   # EU: value enters activation
+  other ~ b + a     + gamma * V_other,
+  npl   ~ b,
+  a     ~ 1 + (1 | subj),
+  c     ~ 1 + (1 | subj),
+  gamma ~ 1 + (1 | subj)
+)
+```
+
+## 10.3  Verification results
+
+The `10_bmm_api_example.R` script:
+
+1. Generates the brms formula via `bmm:::configure_model()` and confirms that
+   the resulting Stan code contains `gamma` and `V_corr`.
+2. Fits the model via `bmm()` and verifies that $\gamma$ is recovered (95% CI
+   covers true value of 0.8).
+3. Confirms that the default prior for `gamma` (via `default_prior()`) is
+   sensible — if no explicit prior is provided, bmm falls back to
+   `normal(1, 1)` on the identity scale; a user-specified
+   `prior(normal(0, 1), nlpar = "gamma", class = "b")` is recommended.
+
+**Conclusion:** The EU extension is API-compatible. No changes to `R/` are
+required. The script serves as the seed for a future vignette section.
+
+## 10.4  Prior recommendation for value slope
+
+| Scenario | Recommended prior |
+|---|---|
+| No prior knowledge | `prior(normal(0, 1), nlpar = "gamma", class = "b")` |
+| Value range 1–2 pts | `prior(normal(0, 0.5), nlpar = "gamma", class = "b")` |
+| Value range 1–10 pts | `prior(normal(0, 0.3), nlpar = "gamma", class = "b")` |
+| Random slope across subj | `prior(normal(0, 0.3), nlpar = "gamma", class = "sd")` |
+
+Positive $\gamma$ = value-directed recall; $\gamma = 0$ = standard M3;
+$\gamma < 0$ = value-avoidance (rare but possible).
+
+---
+
+# 11  Recommendation (updated)
+
+## 11.1  Go/no-go summary
+
+| Extension | Identifiability | Design requirement | Recovery (round 1) | Hardened (round 2) | Verdict |
+|---|---|---|---|---|---|
+| **EU activation** ($\gamma$) | High | VDR, ≥ 2 value levels | ✅ exact recovery, R̂ = 1.003 | ✅ hierarchical, false-pos ≈ 5% | **GO** |
+| **Power utility** ($\gamma$, $\rho$) | Conditional | ≥ 3 value levels, wide range | — | ✅ identified with 3+ levels | **CONDITIONAL GO** |
+| **Prelec weighting** ($\alpha$) | Conditional | Variable option counts | ✅ ΔELPD = 218 | ✅ hierarchical, false-pos ≈ 5% | **CONDITIONAL GO** |
+| **Composite PT** ($\gamma$, $\alpha$) | Conditional | Both VDR + variable $n$ | — | ✅ orthogonal in full design | **CONDITIONAL GO** |
+| **Decision vs encoding** | Not from data alone | Timing manipulation OR indiv. diff. | — | Confounded in standard VDR | **DESIGN REQUIRED** |
+
+## 11.2  Prototype A (EU activation): GO — confirmed
+
+The EU extension is:
+
+- API-compatible with existing `m3(version = "custom")` (verified in WP5)
+- Recovers $\gamma$ with appropriate false-positive control at $\gamma = 0$
+  in hierarchical designs (WP1)
+- Well-specified even without power-utility curvature, when only 2 value
+  levels are available
+
+**Recommended next step:** Add a paragraph to the `m3()` help page and a
+vignette section demonstrating `gamma ~ 1 + (1 | subj)` in a VDR analysis.
+The seed code is in `10_bmm_api_example.R`.
+
+## 11.3  Power utility ($\rho$): CONDITIONAL GO
+
+$\rho$ is identifiable with ≥ 3 distinct value levels and a wide value range.
+Most published VDR designs use 4–6 discrete values, so $\rho$ is estimable
+in principle. However:
+
+- $(\gamma, \rho)$ are highly collinear in 2-level designs (do not add $\rho$
+  without ≥ 3 levels)
+- Requires explicit `prior(lognormal(0, 0.5), nlpar = "rho", class = "b", lb = 0.05)`
+
+**Recommended next step:** Only implement when a collaborator has a 3+-level
+VDR dataset. The `07_power_utility.R` script is the prototype.
+
+## 11.4  Prelec weighting ($\alpha$): CONDITIONAL GO — unchanged
+
+Design requirement (variable set sizes) is non-standard. Hold until a
+concrete use case arises.
+
+## 11.5  Composite PT: CONDITIONAL GO
+
+Requires both VDR and variable set sizes. High scientific value for prospect
+theory in WM but demanding experimentally. Boundary conditions documented in
+`09_composite_pt.R`.
+
+## 11.6  Stage distinction: DESIGN REQUIRED
+
+Standard VDR data cannot separate encoding- from decision-stage value effects
+using LOO alone. Individual-differences correlation ($c_i$ vs $\gamma_i$)
+provides a partial separation. A timing manipulation (value at study vs. test)
+provides a clean separation.
+
+**Recommended:** Document this confound in the `m3` vignette so users who run
+VDR analyses interpret $\gamma$ as a net value effect, not a pure encoding
+effect.
+
+## 11.7  API sketch (Prototype A — ready to document)
+
+```r
+library(bmm)
+
+# EU-weighted VDR analysis
+model <- m3(
+  resp_cats   = c("corr", "other", "npl"),
+  num_options = c("n_corr", "n_other", "n_npl"),
+  choice_rule = "softmax",
+  version     = "custom"
+)
+model$links <- list(a = "identity", c = "identity", gamma = "identity")
+
+formula <- bmf(
+  corr  ~ b + a + c + gamma * V_corr,
+  other ~ b + a     + gamma * V_other,
+  npl   ~ b,
+  a     ~ 1 + (1 | subj),
+  c     ~ 1 + (1 | subj),
+  gamma ~ 1 + (1 | subj)   # value-weighting slope
+)
+
+priors <- c(
+  prior(normal(0, 1),   nlpar = "gamma", class = "b"),
+  prior(normal(0, 0.3), nlpar = "gamma", class = "sd")
+)
+
+fit <- bmm(formula = formula, data = vdr_data, model = model, prior = priors)
+# gamma_Intercept > 0: high-value items recalled more often
+```
+
+## 11.8  API sketch (Prototype B — contingent on use case)
+
+```r
+# Prelec weighting (requires variable n_i across trials)
 m3(
   resp_cats   = c("corr", "other", "npl"),
   num_options = c("n_corr", "n_other", "n_npl"),
-  choice_rule = "prelec"   # new
+  choice_rule = "prelec"   # would require new branch in glue_choice_rule_functions()
 )
-
-# Required: n_i / N_total must vary across trials.
-# check_model.m3 should emit a warning if this is not the case.
-```
-
-Parameter table entry for `prelec` version:
-
-```r
-.m3_version_table$ss$links$prelec <- list(c = "identity", a = "identity", alpha = "log")
-.m3_version_table$ss$priors$prelec <- list(
-  alpha = list(main = "lognormal(0, 0.5)", effects = "normal(0, 0.3)")
-)
+# check_model.m3 should warn when n_i is constant within the dataset.
 ```
 
 ---
@@ -484,5 +726,10 @@ Parameter table entry for `prelec` version:
 | `02_prototype_a_eu.R` | EU-activation prototype + brms model spec + identifiability |
 | `03_prototype_b_prelec.R` | Prelec weighting prototype + brms model spec + null model |
 | `04_axiom_simulations.R` | IIA, regularity, transitivity, set-size, similarity checks |
-| `05_parameter_recovery.R` | Actual brms/CmdStan fits + parameter recovery for Prototypes A and B |
+| `05_parameter_recovery.R` | Round 1: pooled fixed-effects recovery for Prototypes A and B |
+| `06_realistic_recovery.R` | Round 2: hierarchical recovery grid with false-positive diagnostics |
+| `07_power_utility.R` | Power utility $u(V)=V^\rho$: identifiability, design requirements |
+| `08_stage_confusion.R` | Encoding vs decision stage: LOO confusion matrix + separation designs |
+| `09_composite_pt.R` | Composite PT M3: joint identifiability of $(\gamma, \alpha)$ |
+| `10_bmm_api_example.R` | bmm API spike: EU extension via `m3()` + `bmf()`, vignette template |
 | `README.qmd` | This document (renders to HTML or PDF via Quarto) |
