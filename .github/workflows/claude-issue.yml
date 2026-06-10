@@ -3,6 +3,10 @@ name: Claude issue agent
 on:
   issues:
     types: [labeled]
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
 
 permissions:
   contents: write
@@ -10,16 +14,19 @@ permissions:
   issues: write
 
 concurrency:
-  group: claude-issue-${{ github.event.issue.number }}
+  group: claude-issue-${{ github.event.issue.number || github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
   claude:
-    # Gate: exact label + sender allowlist. Merges stay human-only via the
-    # protect-develop ruleset (1 approving review, thom-more cannot self-approve).
+    # Gates: actor allowlist always; then either the assign-tm label (fresh
+    # issue dispatch) or an @thom-more mention in an issue/PR comment
+    # (feedback iteration). thom-more itself is not in the allowlist, so it
+    # cannot trigger runs with its own comments.
     if: >
-      github.event.label.name == 'assign-tm' &&
-      contains(fromJSON('["GidonFrischkorn"]'), github.actor)
+      contains(fromJSON('["GidonFrischkorn"]'), github.actor) &&
+      ((github.event_name == 'issues' && github.event.label.name == 'assign-tm') ||
+       (github.event_name != 'issues' && contains(github.event.comment.body, '@thom-more')))
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -77,6 +84,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.BOT_PAT }}
           label_trigger: "assign-tm"
+          trigger_phrase: "@thom-more"
           bot_name: "thom-more"
           bot_id: "${{ vars.THOM_MORE_ID }}"
           base_branch: "develop"
@@ -104,15 +112,8 @@ jobs:
                 ]
               }
             }
-          prompt: |
-            Work GitHub issue #${{ github.event.issue.number }} in this repository
-            (bmm, an R package; the default branch is develop).
-            Follow the conventions in CLAUDE.md. Loop internally: implement, run
-            `Rscript -e 'devtools::test()'`, fix failures, and re-run until the
-            suite is green. If you changed roxygen comments, also run
-            `Rscript -e 'devtools::document()'`. Then commit on your branch and
-            open a pull request to develop that references the issue. Do not
-            merge. If blocked, comment on the issue describing what you tried,
-            then stop.
+          prompt: >-
+            ${{ github.event_name == 'issues' &&
+            format('Work GitHub issue #{0} in this repository (bmm, an R package; the default branch is develop). Follow the conventions in CLAUDE.md. Loop internally: implement, run Rscript -e "devtools::test()", fix failures, and re-run until the suite is green. If you changed roxygen comments, also run Rscript -e "devtools::document()". Then commit on your branch and open a pull request to develop that references the issue. Do not merge. If blocked, comment on the issue describing what you tried, then stop.', github.event.issue.number) || '' }}
           claude_args: |
             --max-turns 50
