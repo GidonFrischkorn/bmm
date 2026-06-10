@@ -91,17 +91,18 @@ print(out$brms_formula)
 cat("\nFitting hierarchical 2HTM via mpt_to_brms() output...\n")
 
 fit_hier <- brm(
-  formula = out$brms_formula,
-  data    = sim_hier_prep,
-  prior   = out$suggested_priors,
-  family  = binomial(),
-  chains  = 4,
-  iter    = 2000,
-  warmup  = 1000,
-  cores   = 4,
-  seed    = 42,
-  silent  = 2,
-  refresh = 0
+  formula  = out$brms_formula,
+  data     = sim_hier_prep,
+  prior    = out$suggested_priors,
+  family   = binomial(),
+  backend  = "cmdstanr",
+  chains   = 4,
+  iter     = 2000,
+  warmup   = 1000,
+  cores    = 4,
+  seed     = 42,
+  silent   = 2,
+  refresh  = 0
 )
 
 cat("\nModel summary:\n")

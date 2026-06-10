@@ -83,17 +83,18 @@ print(out_pcm$brms_formula)
 # Fit
 cat("\nFitting PCM (4 chains × 1000 iter, warmup=500)...\n")
 fit_pcm <- brm(
-  formula = out_pcm$brms_formula,
-  data    = sim_pcm_prep,
-  prior   = out_pcm$suggested_priors,
-  family  = out_pcm$family_obj,
-  chains  = 4,
-  iter    = 1000,
-  warmup  = 500,
-  cores   = 4,
-  seed    = 42,
-  silent  = 2,
-  refresh = 0
+  formula  = out_pcm$brms_formula,
+  data     = sim_pcm_prep,
+  prior    = out_pcm$suggested_priors,
+  family   = out_pcm$family_obj,
+  backend  = "cmdstanr",
+  chains   = 4,
+  iter     = 1000,
+  warmup   = 500,
+  cores    = 4,
+  seed     = 42,
+  silent   = 2,
+  refresh  = 0
 )
 
 cat("\nPCM model summary:\n")
@@ -221,17 +222,18 @@ print(out_smm3$brms_formula)
 # Fit
 cat("\nFitting SMM3 (4 chains × 1000 iter, warmup=500)...\n")
 fit_smm <- brm(
-  formula = out_smm3$brms_formula,
-  data    = sim_smm_prep,
-  prior   = out_smm3$suggested_priors,
-  family  = out_smm3$family_obj,
-  chains  = 4,
-  iter    = 1000,
-  warmup  = 500,
-  cores   = 4,
-  seed    = 42,
-  silent  = 2,
-  refresh = 0
+  formula  = out_smm3$brms_formula,
+  data     = sim_smm_prep,
+  prior    = out_smm3$suggested_priors,
+  family   = out_smm3$family_obj,
+  backend  = "cmdstanr",
+  chains   = 4,
+  iter     = 1000,
+  warmup   = 500,
+  cores    = 4,
+  seed     = 42,
+  silent   = 2,
+  refresh  = 0
 )
 
 cat("\nSMM model summary:\n")

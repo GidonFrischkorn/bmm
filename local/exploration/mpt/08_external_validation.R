@@ -137,17 +137,18 @@ print(out_pcm$brms_formula)
 cat("\nFitting PCM to RB1988 data (4 chains × 1500 iter, warmup=750)...\n")
 
 fit_rb <- brm(
-  formula = out_pcm$brms_formula,
-  data    = rb1988_prep,
-  prior   = out_pcm$suggested_priors,
-  family  = out_pcm$family_obj,
-  chains  = 4,
-  iter    = 1500,
-  warmup  = 750,
-  cores   = 4,
-  seed    = 42,
-  silent  = 2,
-  refresh = 0
+  formula  = out_pcm$brms_formula,
+  data     = rb1988_prep,
+  prior    = out_pcm$suggested_priors,
+  family   = out_pcm$family_obj,
+  backend  = "cmdstanr",
+  chains   = 4,
+  iter     = 1500,
+  warmup   = 750,
+  cores    = 4,
+  seed     = 42,
+  silent   = 2,
+  refresh  = 0
 )
 
 cat("\nModel summary:\n")

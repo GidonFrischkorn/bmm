@@ -138,17 +138,18 @@ prior_corr <- c(
 )
 
 fit_corr <- brm(
-  formula = out$brms_formula,
-  data    = sim_prep,
-  prior   = prior_corr,
-  family  = binomial(),
-  chains  = 4,
-  iter    = 1000,
-  warmup  = 500,
-  cores   = 4,
-  seed    = 42,
-  silent  = 2,
-  refresh = 0
+  formula  = out$brms_formula,
+  data     = sim_prep,
+  prior    = prior_corr,
+  family   = binomial(),
+  backend  = "cmdstanr",
+  chains   = 4,
+  iter     = 1000,
+  warmup   = 500,
+  cores    = 4,
+  seed     = 42,
+  silent   = 2,
+  refresh  = 0
 )
 
 cat("\nModel summary:\n")
