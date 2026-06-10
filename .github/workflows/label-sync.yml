@@ -1,0 +1,46 @@
+name: Sync issue labels to PR
+
+# The claude-issue workflow scales its turn budget from labels on the
+# triggering entity. Fresh dispatches read the issue's labels; @thom-more
+# follow-ups on a PR read the PR's labels — so budget-relevant labels must
+# propagate from issue to PR, deterministically, the moment a PR references
+# the issue.
+
+on:
+  pull_request:
+    types: [opened, edited]
+
+permissions:
+  issues: read
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const SYNC = ['exploration'];  // budget-relevant labels to propagate
+            const pr = context.payload.pull_request;
+            const text = `${pr.title}\n${pr.body || ''}\n${pr.head.ref}`;
+            const nums = [...new Set([...text.matchAll(/#(\d+)/g)].map(m => Number(m[1])))]
+              .filter(n => n !== pr.number);
+            const labels = new Set();
+            for (const n of nums) {
+              try {
+                const { data } = await github.rest.issues.get({ ...context.repo, issue_number: n });
+                if (data.pull_request) continue;  // referenced number is a PR, not an issue
+                for (const l of data.labels) {
+                  const name = typeof l === 'string' ? l : l.name;
+                  if (SYNC.includes(name)) labels.add(name);
+                }
+              } catch (e) { /* referenced number may not exist — ignore */ }
+            }
+            if (labels.size) {
+              await github.rest.issues.addLabels({ ...context.repo,
+                issue_number: pr.number, labels: [...labels] });
+              core.info(`added: ${[...labels].join(', ')}`);
+            } else {
+              core.info('no budget-relevant labels found on referenced issues');
+            }
