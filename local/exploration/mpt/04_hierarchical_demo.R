@@ -2,8 +2,7 @@
 # Demonstrates parameter recovery using the mpt_to_brms() infrastructure
 # from 03_mpt_parser.R.
 
-source(file.path(dirname(sys.frame(1)$ofile), "03_mpt_parser.R"),
-       local = TRUE)
+source("local/exploration/mpt/03_mpt_parser.R", local = TRUE)
 
 library(brms)
 library(dplyr)
@@ -157,7 +156,7 @@ if (requireNamespace("bayesplot", quietly = TRUE)) {
   pp <- pp_check(fit_hier, type = "rootogram", ndraws = 100)
   if (requireNamespace("ggplot2", quietly = TRUE)) {
     ggplot2::ggsave(
-      file.path(dirname(sys.frame(1)$ofile), "04_ppc_rootogram.png"),
+      "local/exploration/mpt/04_ppc_rootogram.png",
       pp, width = 8, height = 5
     )
     cat("  Saved to 04_ppc_rootogram.png\n")
