@@ -21,7 +21,7 @@ jobs:
       - uses: actions/github-script@v7
         with:
           script: |
-            const SYNC = ['exploration'];  // budget-relevant labels to propagate
+            const SYNC = ['exploration', 'hard-task'];  // budget-relevant labels to propagate
             const pr = context.payload.pull_request;
             const text = `${pr.title}\n${pr.body || ''}\n${pr.head.ref}`;
             const nums = [...new Set([...text.matchAll(/#(\d+)/g)].map(m => Number(m[1])))]
