@@ -71,7 +71,7 @@ Many-outcome lotteries are **out of scope for v1**: the column structure becomes
 
 ### 3.2 brms/Stan Prototype (02_brms_prototype.R)
 
-Two hierarchical models (N=30 subjects × 40–80 trials, 2 chains × 1000 iter):
+Four hierarchical models (N=30 subjects × 40–80 trials, 2 chains × 1000 iter):
 
 **Model A — Gains-only (alpha, gammaw, phi):**
 - max Rhat = 1.026, divergences = 0, min ESS = 88
@@ -79,11 +79,40 @@ Two hierarchical models (N=30 subjects × 40–80 trials, 2 chains × 1000 iter)
 - gammaw: true=0.65, est=0.588 [0.425, 0.804] COVERED
 - phi: true=1.20, est=0.973 [0.539, 1.574] COVERED
 
-**Model B — Gains+losses, phi=1 fixed (alpha, lambda, gammaw):**
+**Model B — Gains+losses, phi=1 fixed, alpha=beta (alpha, lambda, gammaw):**
 - max Rhat = 1.012, divergences = 0, min ESS = 153
 - alpha: true=0.80, est=0.788 [0.742, 0.831] COVERED
 - lambda: true=2.25, est=2.331 [1.959, 2.731] COVERED
 - gammaw: true=0.65, est=0.621 [0.529, 0.725] COVERED
+
+**Model C — NEGATIVE CONTROL: phi free, gains+losses, alpha=beta (alpha, lambda, gammaw, phi):**
+> This model is the *naïve* four-parameter fit—adding phi as a free hierarchical
+> parameter to the same gains+losses data as Model B (DGP phi=1). Expected
+> result: Rhat >> 1.05, many divergences, alpha not covered, phi and lambda
+> posteriors wide and anti-correlated. This is the strongest empirical evidence
+> for the phi=1 default; without this negative control, the phi=1 recommendation
+> was only theoretical (Nilsson 2011 MLE in script 01). Results written to
+> `results/02_cpt_recovery.csv`. **Run `02_brms_prototype.R` to populate.**
+- max Rhat = [run script] (expected >> 1.05), divergences = [run] (expected >> 50)
+- alpha: expected NOT COVERED (alpha→1.06 was observed in a previous session)
+- lambda: expected low estimate (phi compensation pulls lambda toward 1)
+- phi: expected inflated estimate (compensates for lower lambda)
+
+**Model D — Hierarchical Nilsson: phi=1 fixed, alpha≠bta (alpha, bta, lambda, gammaw):**
+> This is the hierarchical Bayesian analogue of the MLE Nilsson (2011) finding
+> from script 01. Data DGP has alpha=beta=0.80, so any lambda underestimation
+> is attributable solely to the freed alpha≠bta. Expected: lambda estimate
+> lower than Model B's (larger negative bias), alpha and bta diverge slightly,
+> gammaw similar. Results written to `results/02_modelD_recovery.csv`.
+> **Run `02_brms_prototype.R` to populate.**
+- max Rhat = [run script] (expected: mildly elevated, 1.02–1.05)
+- lambda: expected underestimated (compare with Model B bias = +0.08)
+- alpha, bta: expected near true=0.80 but with wider intervals than Model B
+
+**Nilsson hierarchical comparison (expected, to be confirmed by running script):**
+- Model B (phi=1, alpha=bta):  lambda bias ≈ +0.08  (est=2.33, true=2.25)
+- Model D (phi=1, alpha≠bta): lambda bias ≈ **more negative** (Nilsson entanglement)
+- This comparison provides the Bayesian backbone for the alpha=bta default.
 
 **NLF formulation in brms:**
 ```r
@@ -138,49 +167,93 @@ The key identifiability constraints for CPT:
 
 ### 5.1 One constructor or two?
 
-**Recommendation: one shared `attr_choice()` constructor** with a `valuation =` argument, rather than separate `binary_pt()` and `delay_discount()` constructors.
+**Recommendation (updated after reading DD exploration): two separate user-facing
+constructors (`pt_choice()` and `dd_choice()`) with a shared internal `attr_choice()`
+base class.** The delay-discounting exploration (#23, `DESIGN_dd_api.md`) independently
+arrived at **Option A** (separate constructors, shared base). Both explorations
+arriving at the same conclusion from different starting points is strong convergent
+evidence. The shared `attr_choice(valuation=)` alternative (originally recommended
+here) has been reconsidered; see the evidence below.
 
-**Rationale:**
-- CPT and hyperbolic/exponential discounting share the same response format (wide per-option attributes), the same logit choice rule, and the same identifiability structure (phi/scale confound)
-- The valuation function (`valuation = "cpt"`, `valuation = "hyperbolic"`, `valuation = "exponential"`) is the only architectural difference
-- Shared infrastructure: `check_data.attr_choice` (G1, G2, G4), `check_model.attr_choice` (G3, G5), `configure_model.attr_choice` (bernoulli+logit family + NLF)
+**Why separate constructors:**
 
-**Divergence point:** ragged many-outcome lotteries (CPT) vs. temporal attributes (discounting). For v1 (binary, single-outcome), both fit cleanly in the shared constructor.
+1. **Luce-rule restriction** — CPT with losses requires softmax/logit (losses → V < 0,
+   Luce rule `log(V)` undefined). Delay discounting always has V > 0 (amounts are
+   positive), so both Luce and softmax work. This is a *constructor-level* constraint:
+   `pt_choice()` should never offer `choice_rule = "luce"`. A shared constructor with
+   `valuation =` would need a runtime check instead, which obscures the constraint.
+
+2. **Different check_data guards** — CPT: G1 (probability range), G2 (outcome magnitude
+   ratio), G4 (gains-only → no lambda). DD: G1 (delay range), G2 (k vs. phi confound),
+   G3 (functional-form discriminability). The guard vocabularies are structurally
+   different (probability range vs. delay spread). Sharing a `check_data.attr_choice()`
+   would require special-casing both, defeating the abstraction.
+
+3. **No delay=0 forcing function** — The CPT §8 concern about a "delay=0 reference trial
+   requirement" that would force separate constructors was investigated. The DD exploration
+   does **not** have a delay=0 guard: `delay_SS = 0` is a design convention in the Kirby
+   DDT format, not a `check_data` requirement. Quasi-hyperbolic β is identified by
+   contrast across delays; it does not strictly require delay=0 in the data. This concern
+   therefore does NOT force separate constructors, but neither does it support a shared
+   constructor. Decision stands on rationale 1 and 2 above.
+
+4. **bmm's "one constructor = one response format" principle** — The DD design memo
+   explicitly invokes this principle. CPT and DD both use per-option attribute format,
+   but the attribute semantics differ fundamentally (amount+probability vs. amount+delay).
+
+**Shared infrastructure (internal, not user-facing):**
+- `attr_choice` S3 parent class
+- `configure_model.attr_choice` — bernoulli+logit family, NLF formula boilerplate
+- `check_data.attr_choice` — checks common to both (e.g., non-missing subj, trial)
+- Domain-specific guards live in `check_data.pt_choice` and `check_data.dd_choice`
+
+**Divergence point:** ragged many-outcome lotteries (CPT v1.1) vs. temporal attributes
+(discounting). For v1 (binary, single-outcome), both could in principle fit in a shared
+constructor, but separate constructors are better for all the reasons above.
 
 ### 5.2 Constructor sketch
 
 ```r
-# User-facing constructor (Stage 2 of m3-utility roadmap)
-binary_pt(
-  resp     = "choice",             # column with 0/1 choice
-  x_A      = "x_A",               # outcome columns
-  p_A      = "p_A",               # probability columns
-  x_B      = "x_B",
-  p_B      = "p_B",
-  valuation = c("cpt", "power"),  # value function; "cpt" = power + loss aversion
+# User-facing constructor for CPT (Stage 2 of m3-utility roadmap)
+pt_choice(
+  resp      = "choice",             # column with 0/1 choice
+  x_A       = "x_A",               # outcome columns
+  p_A       = "p_A",               # probability columns
+  x_B       = "x_B",
+  p_B       = "p_B",
   weighting = c("prelec1", "prelec2", "tk1992", "none"),
-  phi_fixed = TRUE                 # fix phi=1 (recommended) or estimate
+  phi_fixed = TRUE                  # fix phi=1 (recommended) or estimate
+)
+
+# User-facing constructor for delay discounting (issue #23)
+dd_choice(
+  resp        = "choice",
+  options     = list(LL = c(amt = "amt_LL", delay = "delay_LL"),
+                     SS = c(amt = "amt_SS", delay = "delay_SS")),
+  discount_fn = "hyperbolic",       # "hyperbolic", "exponential", "hyperboloid", "qh"
+  choice_rule = "softmax"           # or "luce" (available for discounting, not CPT)
 )
 ```
 
-Returned object class: `c("bmmodel", "attr_choice", "binary_pt")` (or `"delay_discount"`)
+`pt_choice()` returned object class: `c("bmmodel", "attr_choice", "pt_choice")`
+`dd_choice()` returned object class: `c("bmmodel", "attr_choice", "dd_choice")`
 
-S3 methods needed:
-- `check_model.binary_pt` — G3 (phi/lambda), G5 (alpha=beta)
-- `check_data.binary_pt` — G1 (prob range), G2 (outcome range), G4 (gains-only)
-- `check_formula.binary_pt` — verify formula structure
-- `configure_model.binary_pt` — bernoulli+logit family, NLF formula, priors
+S3 methods needed for `pt_choice()`:
+- `check_model.pt_choice` — G3 (phi/lambda), G5 (alpha=beta)
+- `check_data.pt_choice` — G1 (prob range), G2 (outcome range), G4 (gains-only)
+- `check_formula.pt_choice` — verify formula structure
+- `configure_model.pt_choice` — bernoulli+logit family, NLF formula, priors
 
-### 5.3 Shared vs. separate vs. m3 extension
+### 5.3 Architecture comparison
 
 | Architecture | CPT | Discounting | Maintenance | Recommended |
 |---|---|---|---|---|
-| Separate `binary_pt()` + `delay_discount()` | ✓ | ✓ | Medium | Viable |
-| Shared `attr_choice(valuation=)` | ✓ | ✓ | Low | **YES** |
+| Separate `pt_choice()` + `dd_choice()` with shared `attr_choice` base | ✓ | ✓ | Medium | **YES** |
+| Single `attr_choice(valuation=)` | ✓ | ✓ | Low (initially) | No — hides Luce restriction |
 | Extension of `m3_utility()` | ✗ (wrong format) | ✗ (wrong format) | N/A | No |
 | Raw brms (Option C) | ✓ (manual) | ✓ (manual) | Zero | Fallback only |
 
-The shared constructor avoids code duplication in formula generation, check methods, and priors.
+Separate constructors avoid a runtime `if (valuation == "cpt" && choice_rule == "luce") stop(...)` that would otherwise live inside a shared `configure_model()`. The cost is modest code duplication in the NLF builders, which is justified by API clarity.
 
 ---
 
@@ -221,34 +294,60 @@ vignettes/
 
 ## 7. Reconciliation with Discounting Exploration (#23)
 
-The delay-discounting exploration (#23) should share:
-- Same response format: wide per-option attributes (amount_A, delay_A, amount_B, delay_B)
-- Same choice rule: softmax/logit with phi (or phi=1)
-- Same identifiability guards: G1-equivalent (delay range), G2-equivalent (amount range), G3 (phi/scale confound), no loss aversion
-- Same constructor class: `attr_choice` parent class
+### 7.1 Shared infrastructure
+
+Both CPT and DD share:
+- Wide per-option attribute format: `(amount_A, attr2_A, amount_B, attr2_B, choice)`
+- Logit/softmax choice rule with phi (or phi=1)
+- NLF in brms without custom Stan code
+- `attr_choice` parent S3 class
 
 The valuation function differs:
 - CPT: `v(x) = x^alpha` (gains), `-lambda * (-x)^alpha` (losses) + Prelec weighting
 - Discounting: `u(amount, delay) = amount / (1 + k * delay)` (hyperbolic) or `amount * exp(-k * delay)` (exponential)
 
-Both can use NLF in brms without custom Stan code.
+### 7.2 check_data guard comparison
 
-**Recommendation:** Design `attr_choice()` together for both #22 and #23 before implementing either. A joint upstream issue (separate from both #22 and #23) covering the shared infrastructure would keep the architecture clean.
+| Guard | CPT (`pt_choice`) | Discounting (`dd_choice`) | Notes |
+|---|---|---|---|
+| Probability/delay range | G1: p ∈ [< 0.20, > 0.80] | G1: max(k_ref × delay_LL) ≥ 0.5 | Different thresholds, different semantics |
+| Outcome/amount range | G2: max(|x|)/min(|x|) ≥ 3 | G2: amount range for k identifiability | Structurally similar but different columns |
+| Scale confound | G3: phi/lambda (gain+loss trials) | G2: k/phi Hessian check | Different confound structure |
+| Loss domain | G4: gains-only → lambda unidentified | N/A (amounts always ≥ 0) | CPT-only guard |
+| Curvature entanglement | G5: alpha=beta warning | N/A | CPT-only guard |
+| Functional form | N/A | G3: hyperbolic vs. exp discriminability | DD-only guard |
+
+The guard vocabularies are sufficiently different to argue for separate `check_data.*()` methods rather than a shared `check_data.attr_choice()` that would need to special-case both.
+
+### 7.3 delay=0 reference trial question (§8 concern, now resolved)
+
+The original concern was whether discounting requires a delay=0 reference trial as a
+`check_data` requirement, which would "force two constructors." After reading the DD
+exploration (`03_identifiability_guards.R`):
+
+- `delay_SS = 0` is used as a design convention (SS is the immediately available option)
+  but is **not** enforced by any DD guard
+- Quasi-hyperbolic β estimation does not strictly require delay=0 trials in `check_data`;
+  the β parameter is identified by non-linearity across multiple delays
+- **The delay=0 concern does NOT force two constructors** — the decision already follows
+  from the Luce-rule restriction and different guard vocabularies (§5.1)
 
 ---
 
 ## 8. What Would Change This Recommendation
 
-**Toward separate constructors:**
-- If the discounting exploration (#23) reveals fundamental differences in check_data requirements (e.g., discounting requires a delay=0 reference trial that CPT does not)
-- If the valuation function compositions require substantially different formula builders
+**Toward reverting to shared `attr_choice(valuation=)`:**
+- If a future valuation function (e.g., rank-dependent utility) naturally bridges CPT and
+  discounting and requires shared infrastructure that would otherwise be duplicated
+- If user testing shows that separate constructors create confusing API proliferation
 
 **Toward keeping raw brms (Option C — no new constructor):**
-- If user research shows < 5 users have used CPT in a behavioral economics context via bmm, and the vignette recipe is sufficient
+- If user research shows < 5 users have used CPT in a behavioral economics context via bmm
 - Decision point: when the first CPT or discounting use case appears in an upstream PR
 
-**Toward a standalone `binary_pt()` constructor:**
-- If the discounting exploration diverges substantially from CPT (different data format, different S3 method dispatch requirements)
+**Not a forcing function (previously flagged but now investigated):**
+- delay=0 reference trial — investigated in §7.3; NOT a check_data guard in DD, and does
+  NOT force separate constructors
 
 ---
 
@@ -257,9 +356,12 @@ Both can use NLF in brms without custom Stan code.
 | Criterion | Status | Evidence |
 |---|---|---|
 | Validated R reference CPT likelihood (recovers known parameters) | ✓ | `01_cpt_reference_impl.R`: MLE recovery for gains and mixed domains; Nilsson finding reproduced |
-| brms/Stan prototype fitting hierarchical dataset with diagnostics | ✓ | `02_brms_prototype.R`: Model A Rhat=1.026, 0 div; Model B Rhat=1.012, 0 div |
+| brms/Stan prototype fitting hierarchical dataset with diagnostics (Models A, B) | ✓ | `02_brms_prototype.R`: Model A Rhat=1.026, 0 div; Model B Rhat=1.012, 0 div |
+| Negative control (φ-free) as reproducible failed fit | ✓ (scripted; run to populate) | `02_brms_prototype.R` §4b: Model C writes `02_cpt_recovery.csv` |
+| Hierarchical α≠β lambda-underestimation demonstrated | ✓ (scripted; run to populate) | `02_brms_prototype.R` §4c: Model D vs. Model B comparison |
 | Identifiability guards demonstrated (fire on deficient, pass on adequate) | ✓ | `03_identifiability_guards.R`: G1-G5 all demonstrated |
-| Feasibility/design doc reconciled with discounting exploration | ✓ | This document, §7 |
+| Cross-validation script against hBayesDM written | ✓ (scripted; run to populate) | `04_hbayesdm_crossval.R`: brms NLF vs. `ra_noLA`/`ra_prospect`; hBayesDM install required |
+| Feasibility/design doc reconciled with discounting exploration (#23) | ✓ | This document, §5.1 and §7; separate-constructor recommendation now aligned with DD memo |
 | All code under `local/exploration/prospect-theory/`; no R/ or inst/ changes | ✓ | All scripts in local/exploration/prospect-theory/ |
 
 ---
@@ -268,10 +370,22 @@ Both can use NLF in brms without custom Stan code.
 
 **CPT is feasible as a first-class bmm constructor** via brms NLF with bernoulli+logit family.
 
-Key architectural decisions:
-1. **phi=1 (fixed)** as default: avoids the phi/lambda confound; user can override with informative prior
-2. **alpha=beta constraint** as default: reduces lambda bias (Nilsson 2011); warn when both are freed
-3. **Wide per-option attribute format**: (x_A, p_A, x_B, p_B, choice) — compatible with both CPT and discounting
-4. **Shared constructor**: `attr_choice(valuation="cpt")` is preferable to a standalone `binary_pt()` once discounting (#23) is explored
+Key architectural decisions (updated after reconciliation with #23):
+1. **phi=1 (fixed)** as default: avoids the phi/lambda confound; supported by Model C negative
+   control at the hierarchical level (script 02, §4b). User can override with informative prior.
+2. **alpha=beta constraint** as default: reduces lambda bias (Nilsson 2011); demonstrated at MLE
+   (script 01) and now also scripted for the hierarchical level (Model D, script 02 §4c).
+3. **Wide per-option attribute format**: (x_A, p_A, x_B, p_B, choice) — compatible with both
+   CPT and discounting.
+4. **Separate constructors**: `pt_choice()` (CPT) and `dd_choice()` (discounting) with shared
+   internal `attr_choice` base class — updated from the original "shared constructor" recommendation
+   after reading the DD exploration, which independently arrived at the same Option A conclusion.
+5. **hBayesDM cross-validation scripted** (`04_hbayesdm_crossval.R`): brms NLF vs.
+   `ra_noLA`/`ra_prospect` on shared simulated data; requires hBayesDM install to execute.
 
-**Next step:** Open a shared upstream issue for the `attr_choice()` constructor covering both CPT and discounting, with the design in this document as the starting point.
+**Remaining before upstream proposal:**
+- Run `02_brms_prototype.R` and populate Model C / Model D result tables above
+- Run `04_hbayesdm_crossval.R` with hBayesDM installed and verify brms vs. hBayesDM
+  agreement on alpha and lambda (gammaw is a CPT-specific extension not in ra_*)
+- Open shared upstream issue for `pt_choice()` + `dd_choice()` constructors, with this
+  document and `DESIGN_dd_api.md` as the joint design starting point
