@@ -60,9 +60,14 @@ l_params <- as.character(out$link_params)  # values = l-param names
 priors <- do.call(c, lapply(l_params, function(lp) {
   brms::prior_string("normal(0, 1)", nlpar = lp, class = "b", coef = "Intercept")
 }))
+# SD priors per nlpar (required for NL models)
+for (lp in l_params) {
+  priors <- priors +
+    brms::prior_string("student_t(3, 0, 1)", class = "sd", nlpar = lp)
+}
+# Correlation matrix prior for the shared |p| correlation group
 priors <- priors +
-  brms::prior_string("student_t(3, 0, 1)", class = "sd") +
-  brms::prior_string("lkj(1)", class = "cor")
+  brms::prior_string("lkj(1)", class = "cor", group = "id")
 
 cat("\nPriors:\n")
 print(priors)
