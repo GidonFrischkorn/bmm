@@ -162,7 +162,7 @@ paper_table5 <- list(
 int_rows <- rownames(smry)[grep("Intercept", rownames(smry))]
 prob_df <- smry[int_rows, , drop = FALSE]
 prob_df[, c("Estimate", "Q2.5", "Q97.5")] <-
-  pnorm(prob_df[, c("Estimate", "Q2.5", "Q97.5")])
+  pnorm(as.matrix(prob_df[, c("Estimate", "Q2.5", "Q97.5")]))
 # Extract param name from row name: "lWCPU_Intercept" -> "WCPU"
 prob_df$param <- sub("^l(.+)_Intercept$", "\\1", int_rows)
 

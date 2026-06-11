@@ -125,7 +125,7 @@ saveRDS(waic_unit,
 cat("\nGroup-level parameters on probability scale P = Phi(mu):\n")
 prob_smry <- smry[grep("Intercept", rownames(smry)), , drop = FALSE]
 prob_smry[, c("Estimate", "Q2.5", "Q97.5")] <-
-  pnorm(prob_smry[, c("Estimate", "Q2.5", "Q97.5")])
+  pnorm(as.matrix(prob_smry[, c("Estimate", "Q2.5", "Q97.5")]))
 print(round(prob_smry, 3))
 
 cat("\nDone. Results saved to", results_dir, "\n")
