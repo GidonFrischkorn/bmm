@@ -19,7 +19,6 @@ gcm(
   metric      = "euclidean",  # "euclidean" | "cityblock"
   version     = "exemplar",   # "exemplar" | "prototype" | "prm"
   links       = NULL,
-  version     = NULL,
   ...
 )
 ```
