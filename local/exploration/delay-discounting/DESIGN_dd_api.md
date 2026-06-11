@@ -103,6 +103,10 @@ underscores** — use `logk` not `log_k`.
 - Solution B: Luce rule (`P(LL) = V_LL/(V_LL+V_SS)`) eliminates phi entirely
 - Since amounts are positive (V > 0 guaranteed for k, D > 0), **Luce is
   uniquely viable for discounting** — not so for prospect theory with losses
+- **NB — G2 screen is folded into G1:** on every demonstrated design G2
+  fires iff G1 fires (same linear/short-delay regime). G1 is the single
+  implementation gate; the φ-prior recommendation (`logphi ~ Normal(0.7, 0.3)`)
+  is baked into `configure_model.dd_choice()` as the default, not a separate G2 guard
 
 **G3 — Functional-form discriminability:**
 - With short delays (1–7 days): ΔAIC(exp − hyp) = 0.0 → models indistinguishable
@@ -129,19 +133,18 @@ The data layout is identical. The **valuation function** differs:
 | Discounting     | A / (1 + k·D)        | k (discount rate)|
 | Prospect theory | w(p)·v(x)            | α, γ (Prelec+PT) |
 
-**Verdict: the data interface _can_ be shared — but this verdict is
-pending resolution of #24 (prospect theory exploration).**
+**Verdict: the data interface _can_ be shared — column naming locked as
+canonical in this PR; base-class API pending the attribute-choice addendum issue.**
 
-#24 is still open and its data format is not yet locked. Its current
-exploration uses column names `x_A/p_A` (not `amt_A/prob_A`), which
-conflicts with the naming used here. Before either constructor is built,
-#26 and #24 need one agreed attribute-column naming contract and a
-base-class API signed off by both explorations. Recommend pinning a
-single canonical interface spec (a short addendum issue or a shared
-section in both DESIGN memos) before implementation begins.
+The column-naming convention established here (`amt_A/delay_A`, `amt_B/delay_B`)
+is adopted as canonical. #24 (prospect theory) will drop `x_A/p_A` in favour
+of `amt_A/prob_A` once @GidonFrischkorn opens the attribute-based-choice
+interface addendum issue, which both DESIGN memos will reference. `attr_choice()`
+(not user-facing) is the agreed internal base class.
 
-Until that contract exists, the "shared base class" claim in §3.3
-should be read as a _design direction_, not a locked decision.
+Until the addendum issue is opened and #24 is updated, Option A in §3.3
+should be read as a _design direction_; the base-class API is not yet
+signed off across both explorations.
 
 ### 3.2 Choice rule asymmetry
 
@@ -265,6 +268,6 @@ From the issue:
 |-----------|--------|-------|
 | Validated R reference likelihood, recovering known parameters across all four discount functions | ✓ | 01_reference_implementation.R: all |bias_logk| < 0.5; s/beta now reported; qh p(LL) fixed to 0.44 |
 | brms/Stan prototype fitting a small hierarchical dataset, with diagnostics reported | ✓ | 02_brms_prototype.R: R-hat=1.018, r=0.995 |
-| Identifiability guards demonstrated (delay-range guard; k-vs-sensitivity confound) | ✓ | 03_identifiability_guards.R: G1 ✓, G2 fixed (short-delay regime, threshold 0.70), G3 ✓ |
-| Feasibility/design doc with explicit verdict on shared constructor | ~ | This document: Option A direction, pending #24 API lock + column-naming contract |
+| Identifiability guards demonstrated (delay-range guard; k-vs-sensitivity confound) | ✓ | 03_identifiability_guards.R: G1 ✓, G2 screen folded into G1 (fires iff G1 fires; value = φ-prior default), G3 ✓ |
+| Feasibility/design doc with explicit verdict on shared constructor | ✓ | Option A direction; `amt_A/delay_A` naming locked as canonical; addendum issue pending to finalise base-class API with #24 |
 | All code under local/exploration/delay-discounting/; no R/ or inst/ changes | ✓ | Verified |
