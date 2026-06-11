@@ -540,6 +540,84 @@ Posterior-mean D(t) at point estimates (Dmax=0.809, rate=1.088):
 
 ---
 
+### 15.9 WP1–WP5 — External stress test: Al Hadhrami et al. (2025) binding models
+
+**Source:** Al Hadhrami, A., Bartsch, L. M., & Oberauer, K. (2025). A multinomial model-based analysis of bindings in working memory. *Psychological Review*. OSF: https://osf.io/nu4sb/
+
+Two published hierarchical MPT models were fit to real Experiment 1 data (32 participants × 3 cue conditions × 10 response categories, n=50 trials each) using the prototype.
+
+**Models:**
+- *Unitization* (12 free parameters per cue condition): unitisation, correct-target retrieval, item-color, item-location binding probabilities.
+- *Hybrid* (18 free parameters): adds partial-retrieval (`r`-type) parameters for each cue condition.
+
+**EQN converter (`12_eqn_converter.R`):** `build_binding_spec()` reads the published EQN file format (TreeBUGS/MPTinR), substitutes 9 design-fixed guessing constants as decimal literals (avoids Stan integer-division), strips underscores from free parameter names (brms nlpar constraint), and calls `mpt()`. `build_long_data()` reshapes the wide CSV into the long format expected by `data_prep()`.
+
+**Probit-link fix (WP1):** `03_mpt_parser.R` line 250 was emitting `pnorm(` in Stan code instead of `Phi(` when `link = "probit"`. Fixed; Test 8 asserts `Phi(` present and `pnorm` absent.
+
+**Fitting setup:** `(1 | p | id)` correlated random effects for all free parameters; normal(0,1) intercept priors, student_t(3,0,1) SDs, lkj(1) correlation matrix; 4 chains × 2000 iter, 1000 warmup, adapt_delta=0.95, backend="cmdstanr".
+
+**Unitization results** (4 chains × 2000 iter, ~119s, commit `4eb6c61`):
+
+| Metric | Value |
+|---|---|
+| Max Rhat | 1.009 |
+| Divergent transitions | 0 |
+| WAIC | 5511.7 (SE 234.1) |
+
+**Hybrid results** (4 chains × 2000 iter, ~230s, commit `a70defc`):
+
+| Metric | Value |
+|---|---|
+| Max Rhat | 1.005 |
+| Divergent transitions | 54 (1.0%) |
+| WAIC | 2986.5 (SE 44.6) |
+
+**WAIC comparison:**
+
+| | elpd_diff | se_diff |
+|---|---|---|
+| Hybrid | 0.0 | 0.0 |
+| Unitization | −1262.6 | 118.6 |
+
+ΔWAIC (Unitization − Hybrid) = **2525** (paper reports 2547; criterion >1000 ✅)
+
+**Table 5 reproduction (Hybrid model posterior means vs. paper 95% BCIs):**
+
+| Parameter | Cue | brms est | brms 95% CI | Paper mean | Paper BCI | Pass? |
+|---|---|---|---|---|---|---|
+| P(U) | CC | 0.55 | [0.47, 0.62] | 0.55 | [0.47, 0.63] | ✅ |
+| P(U) | WC | 0.28 | [0.21, 0.34] | 0.28 | [0.21, 0.34] | ✅ |
+| P(U) | LC | 0.12 | [0.08, 0.18] | 0.12 | [0.07, 0.18] | ✅ |
+| P(UT\|U) | CC | 0.62 | [0.57, 0.67] | 0.61 | [0.55, 0.66] | ✅ |
+| P(UT\|U) | WC | 0.88 | [0.81, 0.95] | 0.85 | [0.78, 0.92] | ✅ |
+| P(UT\|U) | LC | 0.98 | [0.92, 1.00] | 0.96 | [0.89, 0.99] | ✅ |
+| P(rWord) | LC | 0.58 | [0.49, 0.66] | 0.59 | [0.49, 0.67] | ✅ |
+| P(rWord) | CC | 0.04 | [0.01, 0.11] | 0.06 | [0.00, 0.13] | ✅ |
+| P(rLoc) | WC | 0.57 | [0.48, 0.65] | 0.59 | [0.50, 0.67] | ✅ |
+| P(rLoc) | CC | 0.36 | [0.28, 0.45] | 0.39 | [0.31, 0.48] | ✅ |
+| P(rColor) | WC | 0.03 | [0.00, 0.08] | 0.04 | [0.00, 0.10] | ✅ |
+| P(rColor) | LC | 0.11 | [0.05, 0.19] | 0.12 | [0.05, 0.20] | ✅ |
+| P(ItemWord) | LC | 0.31 | [0.15, 0.47] | 0.30 | [0.12, 0.48] | ✅ |
+| P(ItemWord) | CC | 0.29 | [0.11, 0.48] | 0.29 | [0.08, 0.51] | ✅ |
+| P(ItemLoc) | WC | 0.70 | [0.48, 0.87] | 0.66 | [0.39, 0.87] | ✅ |
+| P(ItemLoc) | CC | 0.55 | [0.37, 0.71] | 0.52 | [0.30, 0.69] | ✅ |
+| P(ItemColor) | LC | 0.28 | [0.18, 0.37] | 0.28 | [0.18, 0.48] | ✅ |
+| P(ItemColor) | WC | 0.31 | [0.20, 0.41] | 0.31 | [0.20, 0.41] | ✅ |
+
+**Passes: 18/18** (criterion ≥15/18 ✅)
+
+Qualitative ordering P(U): CC(0.55) > WC(0.28) > LC(0.12) ✅  
+Qualitative ordering P(UT|U): LC(0.98) > WC(0.88) > CC(0.62) ✅
+
+**Expressibility verdict:** The prototype correctly encodes published 12- and 18-parameter hierarchical MPT models on real data, reproduces all 18 Table 5 parameter estimates within the paper's 95% BCIs, and recovers the WAIC advantage of the Hybrid model (ΔWAIC 2525 vs. paper's 2547).
+
+**Friction noted:**
+- *Underscore renaming:* The published EQN files use parameter names with underscores (e.g., `WC_P_U`, `P_UT_given_U`), which are illegal as brms nlpar names. The `build_binding_spec()` converter strips underscores mechanically (`gsub("[._]", "", ...)`); a production `mpt_from_eqn()` function should report the mapping explicitly.
+- *pnorm vs. Phi:* The probit-link emitter originally emitted `pnorm(` which is not the Stan CDF function. Fixed in WP1 (commit `057b852`).
+- *data_prep location:* `data_prep()` is a closure in the `mpt_to_brms()` output list, not on the `mpt_spec` object. Scripts must call `out <- mpt_to_brms(...); data_fit <- out$data_prep(long)` — this distinction should be clarified in user documentation.
+
+---
+
 ## 16. Known Limitations and Future Work
 
 - **brms naming constraint (enforced):** Parameter names with underscores or dots raise an error at `mpt()` construction time. Users must use `dA`, `gA`, `gNew` style names (no `d_A`, `g.new`). The error message is explicit.
