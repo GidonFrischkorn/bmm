@@ -884,6 +884,100 @@ CI includes 0.05).
 
 ---
 
+# 14  Round 5: API Architecture Analysis
+
+**Sources:** `14_requirements_inventory.md`, `15_user_surface.R`, `16_identifiability_guards.R`,
+`DESIGN_utility_api.md` (revised).
+
+## 14.1  Requirements inventory
+
+Seven requirements enumerated in `14_requirements_inventory.md`.
+Priority by severity:
+
+| # | Requirement | Stage | Severity |
+|---|---|---|---|
+| R1 | Per-category activation formula (shared-slope trap) | check_formula | **silent-wrong** |
+| R4 | Design-dependent identifiability guards | check_data | **silent-wrong** |
+| R5 | Binary PT per-option attribute data | constructor + check_data | runtime error |
+| R3 | Identity links (undocumented) | constructor | runtime error |
+| R2 | Default priors for $\gamma$, $\rho$, $\alpha$ | default_priors | friction |
+| R6 | Utility × weighting composition | construction + formula | friction |
+| R7 | Parameter labelling in `summary()` | postprocess | friction |
+
+Critical finding: R1 and R4 are **silent-wrong** (model runs but answers wrong question
+or posterior is flat) — these are the priority targets for the production implementation.
+
+## 14.2  Architecture coverage matrix
+
+| Requirement | A exploration | A production | B version="utility" | C sibling |
+|---|---|---|---|---|
+| R1 formula trap | ✅ via generator | ✅ | ❌¹ | ✅ |
+| R2 priors | ✅ | ✅ | ✅ | ✅ |
+| R3 links | ✅ | ✅ | ✅ | ✅ |
+| R4 ident. guards | ❌ manual only | ✅ `check_data.m3_utility` | ~ | ✅ |
+| R5 binary PT | ❌ | ❌ | ❌ | ✅ |
+| R6 composition | ✅ | ✅ | ❌ | ✅ |
+| R7 labelling | friction | ~ | friction | ✅ |
+
+¹ Requires updating `construct_m3_act_funs()` — equivalent effort to Option A production.
+
+**Revised recommendation:** Option A production (staged), not the exploration prototype.
+Stage 1: move to `R/model_m3_utility.R` with `"m3_utility"` subclass +
+`check_data.m3_utility` for identifiability guards → resolves R1–R4, R6.
+Stage 2: `binary_pt()` sibling constructor (separate PR) → resolves R5.
+Full rationale in `DESIGN_utility_api.md` §6.
+
+## 14.3  Smoke fits: `m3_utility()` pipeline verified
+
+**Architecture A, UC1 — EU VDR** (N=20×60, 1 chain × 1000 iter, $\gamma_{\text{true}}=0.8$)
+Results in `results/15_smoke_A_UC1.csv`.
+
+| Parameter | True | Estimate | 95% CI | Covered | Max R̂ | Divs |
+|---|---|---|---|---|---|---|
+| $a$ | 2.0 | 2.008 | [0.845, 3.134] | ✅ | 1.016 | 4 |
+| $c$ | 3.0 | 2.954 | [2.767, 3.140] | ✅ | 1.016 | 4 |
+| $\gamma$ | 0.8 | 1.330 | [0.463, 2.768] | ✅ | 1.016 | 4 |
+
+Parameters correctly labelled (`a_Intercept`, `c_Intercept`, `gamma_Intercept`).
+4 divergences (1%) — minor; `adapt_delta = 0.95` recommended for production use.
+$\gamma$ point estimate is upward-biased but true value is within 95% CI.
+Confirmed: `m3_utility()` wrapper + `m3_utility_formula()` pipeline produces
+correct Stan code and samples all utility parameters.
+
+**Architecture A, UC2 — Composite PT** (N=20×80, variable set sizes, 1 chain × 1000 iter)
+Results in `results/15_smoke_A_UC2.csv`.
+
+| Parameter | True | Estimate | 95% CI | Covered | Max R̂ | Divs |
+|---|---|---|---|---|---|---|
+| $a$ | 2.0 | 2.907 | [1.468, 4.484] | ✅ | 1.004 | 30 |
+| $c$ | 3.0 | 3.592 | [3.359, 3.835] | ❌² | 1.004 | 30 |
+| $\gamma$ | 0.6 | 1.118 | [0.147, 2.629] | ✅ | 1.004 | 30 |
+| $\alpha$ | 0.7 | 0.866 | [0.303, 2.037] | ✅ | 1.004 | 30 |
+
+30 divergences (6%) — the Prelec term creates a challenging posterior geometry;
+`adapt_delta = 0.95` or `0.99` is needed for production composite PT fits.
+Prior bug discovered and fixed: `lognormal(0, 0.5)` is wrong for log-link parameters
+(places a lower bound on the linear predictor); corrected to `normal(0, 0.5)` in
+`11_utility_wrapper.R`.
+² Single coverage miss for $c$ with 30 divergences and small N is expected.
+
+## 14.4  Identifiability guards
+
+Three guards prototyped and verified in `16_identifiability_guards.R`:
+
+| Guard | Trigger | Fires on deficient data | Passes on adequate data |
+|---|---|---|---|
+| G1: power utility | $<3$ distinct value levels | ✅ CONFIRMED | ✅ CONFIRMED |
+| G2: Prelec weighting | constant set size | ✅ CONFIRMED | ✅ CONFIRMED |
+| G3: EU slope | constant value column | ✅ CONFIRMED | ✅ CONFIRMED |
+
+In Architecture A exploration: guards must be called manually via
+`check_utility_design(model, data)`. In Architecture A production (with
+`"m3_utility"` subclass in `R/`): `check_data.m3_utility` fires automatically
+via S3 dispatch when `bmm()` is called.
+
+---
+
 # Appendix: file index
 
 | File | Contents |
@@ -898,8 +992,12 @@ CI includes 0.05).
 | `08_stage_confusion.R` | Encoding vs decision stage: LOO confusion matrix + separation designs |
 | `09_composite_pt.R` | Composite PT M3: joint identifiability of $(\gamma, \alpha)$ |
 | `10_bmm_api_example.R` | bmm API spike: EU extension via `m3()` + `bmf()`, vignette template |
-| `11_utility_wrapper.R` | `m3_utility()` prototype: clean API, formula generator, default priors |
+| `11_utility_wrapper.R` | `m3_utility()` prototype: clean API, formula generator, default priors (fix: normal not lognormal for log-link params) |
 | `12_binary_choice_pt.R` | Hierarchical binary PT (Nilsson et al. 2011): rho, alpha, lambda recovery |
-| `DESIGN_utility_api.md` | Design memo: three integration options, recommendation, WP4 decision |
+| `13_recovery_one_cell.R` | Single-cell helper for incremental WP1 grid runs |
+| `14_requirements_inventory.md` | 7 requirements with severity, stage, workaround |
+| `15_user_surface.R` | 9 code snippets (3 UCs × 3 archs) + smoke fits |
+| `16_identifiability_guards.R` | Guard functions, pipeline placement, demos |
+| `DESIGN_utility_api.md` | Design memo: coverage matrix, staged recommendation, impl sketch |
 | `results/` | CSV files for measured parameter recovery results |
 | `README.qmd` | This document (renders to HTML or PDF via Quarto) |
