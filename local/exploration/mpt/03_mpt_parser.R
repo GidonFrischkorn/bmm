@@ -247,7 +247,7 @@ mpt_to_brms <- function(spec,
                          trials_col         = "n",
                          simplex_params     = NULL) {
   stopifnot(inherits(spec, "mpt_spec"))
-  link_fn    <- if (spec$link == "logit") "inv_logit" else "pnorm"
+  link_fn    <- if (spec$link == "logit") "inv_logit" else "Phi"
   trees      <- spec$trees
   resp       <- spec$resp_cats
   n_cats     <- length(resp)
@@ -819,6 +819,42 @@ if (grepl("inv_logit\\(lD\\)", tv_str)) {
 if (!grepl("lDmax", tv_str)) stop("Bypass failed: lDmax missing from formula.")
 if (!grepl("lrate",  tv_str)) stop("Bypass failed: lrate missing from formula.")
 cat("Test 7 passed: time-varying bypass emitted correctly.\n")
+
+
+cat("\n=== Test 8: Probit link smoke test ===\n\n")
+# Build a minimal 2HTM spec with link = "probit" and check that make_stancode
+# emits Phi( rather than pnorm(.
+tree_2htm_p <- mpt_tree("old", list(
+  old = "D + (1 - D) * g",
+  new = "(1 - D) * (1 - g)"
+))
+spec_probit <- mpt(
+  trees = list(tree_2htm_p),
+  link  = "probit"
+)
+out_probit <- mpt_to_brms(
+  spec_probit,
+  predictor_formulas = list(D = ~ 1, g = ~ 1),
+  response_col = "old",
+  trials_col   = "n"
+)
+# Build Stan code for a tiny dummy dataset
+dummy_data <- data.frame(old = 8L, new = 2L, n = 10L, .ind_old = 1L)
+suppressMessages({
+  sc_probit <- brms::make_stancode(
+    out_probit$brms_formula,
+    data    = out_probit$data_prep(dummy_data),
+    family  = binomial(),
+    prior   = out_probit$suggested_priors
+  )
+})
+if (grepl("pnorm", sc_probit))
+  stop("Probit test FAILED: found pnorm in Stan code (should be Phi).")
+if (!grepl("Phi\\(", sc_probit))
+  stop("Probit test FAILED: Phi( not found in Stan code.")
+cat("  Stan code contains Phi( : TRUE\n")
+cat("  Stan code contains pnorm: FALSE\n")
+cat("Test 8 passed: probit link correctly emits Phi.\n")
 
 
 cat("\n=== All tests passed ===\n")
