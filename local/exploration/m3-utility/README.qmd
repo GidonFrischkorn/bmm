@@ -1226,7 +1226,7 @@ All measures are from executed fits.  Round 7 corrections are noted explicitly.
 | $u$ (outgroup contribution) non-covered at near-indifference | `21_model_ea_recovery.csv` | est=0.458 [0.347, 0.577] vs true 0.27 | ✅ CONFIRMED — two causes diagnosed (§15.5) |
 | R9 claim (Luce rule needs raw brms) | `22_welfare_bmm_simple.R` | ❌ INCORRECT — m3 simple rule IS native | **CORRECTION** — see §16.1 |
 | R10 claim (numeraire semantic mismatch) | R/helpers-prior.R:147, model_m3.R:79 | ❌ INCORRECT — `fixed_parameters$b` works | **CORRECTION** — see §16.1 |
-| Luce rule with welfare weights runs in today's m3 | `22_welfare_bmm_simple.R` | wi/wo recovery with lb=0 priors | NOT YET TESTED (fit pending §16.1) |
+| Luce rule + `fixed_parameters$b=1.0` in today's m3 | `results/22_welfare_bmm_simple.csv` | wi=1.153 [1.013,1.299] ✅; wo=0.702 [0.574,0.842] ✅; 0 divs | ✅ CONFIRMED (§16.1) |
 
 **Overall verdict:** Stage 1 implementation (`m3_utility()` → `R/model_m3_utility.R` with
 `"m3_utility"` subclass and guards G1–G4) is **ready to proceed** pending a vignette and
@@ -1256,9 +1256,23 @@ This fit proves simultaneously:
   `fixed_pars_priors()` (R/helpers-prior.R:147) converts it to `constant(1)`.
 - **(G4 adequate):** Lower-bounded priors (`lb = 0`) prevent the positivity hazard.
 
-**Results** (to be filled in after fit):
+**Results** (`results/22_welfare_bmm_simple.csv`):
 
-NOT YET TESTED — fit pending.  Results will appear in `results/22_welfare_bmm_simple.csv`.
+| Parameter | True | Estimate | 95% CI | Covered | Max R̂ | Divergences |
+|---|---|---|---|---|---|---|
+| $w_i$ | 1.20 | 1.153 | [1.013, 1.299] | ✅ | 1.003 | 0 |
+| $w_o$ | 0.80 | 0.702 | [0.574, 0.842] | ✅ | 1.003 | 0 |
+
+Both parameters covered.  0 divergences.  R̂ ≤ 1.003.
+
+**Interpretation:**
+- R9 correction confirmed: `m3(choice_rule = "simple")` + identity links runs
+  without raw brms.  The Luce rule is native to the m3 pipeline.
+- R10 correction confirmed: `fixed_parameters$b <- 1.0` is the correct numeraire
+  mechanism (`fixed_pars_priors()`, R/helpers-prior.R:147, converts to `constant(1)`).
+- Round-6 `u` non-coverage was a near-indifference + prior problem, not a structural
+  limitation.  With well-separated utilities ($w_i = 1.2$, $w_o = 0.8$) and correct
+  lower-bounded priors (`lb = 0`), recovery is clean.
 
 ---
 
