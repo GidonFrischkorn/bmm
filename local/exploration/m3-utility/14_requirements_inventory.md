@@ -3,7 +3,7 @@
 **Date:** 2026-06-11  
 **Branch:** feat/issue-7-m3-utility-exploration  
 **Author:** thom-more (agent run, round 5)  
-**Evidence base:** rounds 1–4 of this exploration
+**Evidence base:** rounds 1–6 of this exploration (R8–R10 added in round 6 from WP5)
 
 ---
 
@@ -36,6 +36,9 @@ failure modes because users receive no error signal.
 | R5 | Per-option attribute data (binary PT outcomes, probabilities) | constructor + check_data | Bypass m3 pipeline entirely; use raw `brms` (script 12) | runtime error |
 | R6 | Utility function × weighting composition (linear/power × none/prelec) | constructor + check_formula | Manual activation formula construction | friction |
 | R7 | Parameter labelling in `summary()` output | postprocess | Know brms NL naming: `b_gamma_Intercept`, `r_subj__gamma`, etc. | friction |
+| R8 | Fixed numeric payoff coefficients in activation formula | constructor + check_formula | Bypass m3 pipeline; write raw `brms::bf()` with numeric literals | **silent-wrong** |
+| R9 | Luce/simple choice rule with non-linear utility (welfare weights) | constructor | Softmax is Luce only when `n_k=1` for all categories; non-linear forms require raw brms | runtime error |
+| R10 | Numeraire fixing (`b = 1` as welfare-weight scale) | constructor + check_model | `fixed_parameters$b = 1.0` sets background noise, not the formula numeraire; semantically different | **silent-wrong** |
 
 ---
 
@@ -218,16 +221,80 @@ clean printing but is not essential for correctness.
 
 ---
 
+### R8 — Fixed numeric payoff coefficients in activation formula
+
+**Problem.** The welfare-weight use case (Gross et al. 2025) requires activation
+formulas with *fixed numeric coefficients* from the payoff matrix:
+```r
+universal ~ log(0.3 + 0.6 * wi + 0.9 * wo)
+```
+where `0.3`, `0.6`, `0.9` are known constants from the experimental design (not
+per-trial data columns). Stage-1 `m3_utility()` generates activations of the form
+`gamma * V_corr` where `V_corr` must be a column in the data frame. There is no
+mechanism to embed fixed numeric coefficients in the NLF formula.
+
+**Evidence.** Script `21_welfare_weight.R` demonstrates this directly: the E_A
+formula uses `nlf(corr ~ log(0.3 + 0.6 * c + u))` with hardcoded payoff constants.
+
+**Why silent-wrong.** A user who tries to map welfare weights onto `gamma * V_corr`
+would need to pre-compute `V_corr = 0.6 * wi_init` as a constant column — which
+works numerically only for the linear case and fails for the log-utility form.
+
+---
+
+### R9 — Luce/simple choice rule with non-linear utility
+
+**Problem.** The Gross et al. welfare-weight model uses the Luce ratio rule:
+```
+P(k) ∝ U(k) = payoff-matrix-constrained utility
+```
+not the standard softmax with log-probabilities. Stage-1 defaults to softmax.
+While softmax equals Luce when `n_k = 1` for all categories AND utilities are
+log-scale, the non-linear `log(0.3 + 0.6*wi + 0.9*wo)` forms cannot be expressed
+in softmax/log-linear terms without approximation.
+
+**Partial coverage.** If the user writes `log(U(k))` as the activation, and all
+`n_k = 1`, then softmax equals Luce numerically. Stage-1 can handle this *only*
+for the standard M3 softmax when log-utilities are additive.
+
+**Evidence.** `21_welfare_weight.R` Part (b) confirmed: E_D (Luce rule) and Model D
+(softmax reparametrization) have identical log-likelihoods when the utility
+transformation is absorbed into the parameter space.
+
+---
+
+### R10 — Numeraire fixing (`b = 1` as welfare-weight scale)
+
+**Problem.** In the Gross et al. welfare-weight model, the own-payoff utility is
+normalized to 1.0 (the numeraire). In M3 notation this means the background
+activation for the "keep" category is `b = log(1.0) = 0`, which is Stage-1's
+default. *However*, the welfare-weight *scale* is fixed by setting `b_form = 1.0`
+(the baseline utility in the Luce rule), which is distinct from the M3 background.
+
+Stage-1 would need a `fixed_parameters` argument analogous to `bmm()`'s
+`fixed_parameters = list(b = 1.0)`. But this sets the M3 *background noise*
+parameter to 1.0 — a completely different quantity from the payoff-matrix
+numeraire.
+
+**Evidence.** `21_welfare_weight.R` Part (d) documents this semantic mismatch:
+setting `fixed_parameters$b = 1.0` in Stage-1 would silently produce wrong
+welfare-weight estimates by conflating two different model parameters.
+
+---
+
 ## Priority Order
 
 By impact on correctness:
 1. **R4 identifiability guards** (silent-wrong, no current workaround)
 2. **R1 activation formula trap** (silent-wrong, workaround exists but undiscovered)
-3. **R5 binary PT data** (runtime error / pipeline bypass required)
-4. **R3 links documentation** (runtime error but loud; workaround exists)
-5. **R2 default priors** (friction; workaround exists)
-6. **R6 composition formula** (friction; workaround in 11_utility_wrapper.R)
-7. **R7 parameter labelling** (friction; cosmetic)
+3. **R8 fixed payoff coefficients** (silent-wrong, new from WP5; requires Stage-2)
+4. **R10 numeraire fixing** (silent-wrong, new from WP5; semantic mismatch)
+5. **R5 binary PT data** (runtime error / pipeline bypass required)
+6. **R3 links documentation** (runtime error but loud; workaround exists)
+7. **R9 Luce/simple rule** (runtime error for non-linear forms; new from WP5)
+8. **R2 default priors** (friction; workaround exists)
+9. **R6 composition formula** (friction; workaround in 11_utility_wrapper.R)
+10. **R7 parameter labelling** (friction; cosmetic)
 
 ---
 
