@@ -1,0 +1,1342 @@
+---
+title: "Extending the M3 toward Utility-Theory Choice Models"
+subtitle: "Exploration report — bmm issue #7"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    embed-resources: true
+  pdf:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+source("01_formal_mapping.R", echo = FALSE)
+```
+
+# 1  Formal mapping: M3 choice rules and utility theory
+
+## 1.1  Softmax M3 = Multinomial Logit / Random-Utility Model
+
+The softmax choice rule maps category activations $a_i$ and option counts $n_i$
+to choice probabilities via:
+
+$$
+P(i) = \frac{n_i \exp(a_i)}{\sum_j n_j \exp(a_j)}
+$$
+
+This is exactly the **Multinomial Logit (MNL)** model, also called the
+**Luce choice rule** with exponential strengths.  It admits a clean
+random-utility derivation: if
+
+$$
+U_i = a_i + \ln n_i + \varepsilon_i, \quad \varepsilon_i \overset{\text{iid}}{\sim} \text{Gumbel}(0, 1),
+$$
+
+then $P(\arg\max_i U_i = i) = P(i)$ above.  The script
+`01_formal_mapping.R` verifies this numerically; the simulated
+$(n = 200{,}000)$ probabilities match the analytic formula to within
+sampling error.
+
+**Temperature.**  The softmax temperature $\tau$ (noise scale) is implicit
+in the *scale* of the activation parameters $a_i$: rescaling all
+activations by $1/\tau$ is equivalent to increasing the Gumbel noise
+scale from 1 to $\tau$.  As $\tau \to 0$ (or equivalently, as activation
+contrasts grow), choices become deterministic; as $\tau \to \infty$,
+choices become uniform.
+
+## 1.2  Simple rule M3 = Luce (1959) ratio rule
+
+The simple choice rule uses linear (ratio-scale) activations:
+
+$$
+P(i) = \frac{(a_i + b)\, n_i}{\sum_j (a_j + b)\, n_j}
+$$
+
+where the background noise $b = 0.1$ (fixed) ensures all strengths are
+positive.  This is Luce's (1959) original **ratio rule**, with strength
+$s_i = (a_i + b)\,n_i > 0$.  The log link on $a_i$ in the simple rule
+ensures $a_i > 0$ before adding $b$.
+
+## 1.3  Temperature and scale-invariance: where M3 diverges from vNM
+
+Von Neumann–Morgenstern (vNM) utility functions are unique up to a
+**positive affine transformation**:
+
+$$
+U' = \alpha U + \beta, \quad \alpha > 0.
+$$
+
+The M3 rules satisfy weaker invariances:
+
+| | Shift $U + \beta$ | Scale $\alpha U$ | vNM |
+|---|---|---|---|
+| **Softmax** | invariant ✓ | **not** invariant | both required |
+| **Simple**  | **not** invariant | invariant ✓ | both required |
+
+The softmax M3 is *interval-scale* (shift-invariant); the simple rule is
+*ratio-scale* (scale-invariant).  Neither achieves the full affine class
+of vNM.  The code in `01_formal_mapping.R` verifies these properties
+numerically.
+
+**Practical implication.**  In the softmax M3, the *absolute* scale of
+activations is substantively meaningful (it encodes decisiveness /
+inverse temperature), unlike vNM utilities.  The identification constraint
+$b = 0$ pins the location of the scale; the activation contrasts determine
+the slope.  This is *useful* for cognitive modelling (it quantifies
+randomness in memory retrieval) but means that talking about "utility" in
+the strict vNM sense requires an additional link between $a_i$ and outcome
+utilities.
+
+## 1.4  Independence of Irrelevant Alternatives (IIA)
+
+Both M3 rules satisfy IIA.  For the softmax:
+
+$$
+\frac{P(i)}{P(j)} = \frac{n_i \exp(a_i)}{n_j \exp(a_j)},
+$$
+
+which depends only on alternatives $i$ and $j$, not on any other
+alternative $k$.  An analogous argument holds for the simple rule.
+
+**IIA limitation for WM modelling.**  IIA means that adding more "other"
+items to a memory set steals probability from "correct" and "npl"
+proportionally.  Debreu's (1960) similarity effect suggests that
+*similar* alternatives (near-duplicates) should steal mainly from each
+other.  Both M3 rules cannot represent this.  For designs where item
+similarity within a category varies, a nested-logit or elimination-by-aspects
+model would be required.
+
+---
+
+# 2  Prototype A — payoff-modulated activation (Expected Utility)
+
+**Source:** `02_prototype_a_eu.R`
+
+## 2.1  Model
+
+The standard softmax M3 in a simple-span task has:
+
+$$
+a_i^{\text{corr}} = b + a + c, \quad a_i^{\text{other}} = b + a, \quad a_i^{\text{npl}} = b.
+$$
+
+The EU extension adds an **expected-value term** $\gamma V_i$ to each
+category's activation:
+
+$$
+a_i^{\text{corr}} = b + a + c + \gamma V_{\text{corr}}, \quad
+a_i^{\text{other}} = b + a + \gamma V_{\text{other}}, \quad
+a_i^{\text{npl}} = b,
+$$
+
+where $V_i$ is the point value associated with the items in category $i$
+(e.g., 1 or 2 points in a VDR design).  The parameter $\gamma$ captures
+how much utility-weighting modulates category activation.
+
+This is mathematically equivalent to adding $\gamma V_i$ as an additive
+predictor in the log-linear predictor of the softmax, which means:
+
+$$
+P(i) \propto n_i \exp(a_i + \gamma V_i) = n_i \exp(a_i) \cdot \exp(\gamma V_i).
+$$
+
+For $\gamma > 0$, categories whose items have higher value attract
+disproportionately more responses.
+
+## 2.2  brms specification
+
+The full brms NLF formula (from `02_prototype_a_eu.R`):
+
+```r
+eu_formula <- bf(
+  Y | trials(nTrials) ~
+    Idx_corr * (corr + log(n_corr)) + (1 - Idx_corr) * (-100),
+  nlf(muother ~ Idx_other * (other + log(n_other)) + (1 - Idx_other) * (-100)),
+  nlf(munpl   ~ Idx_npl   * (npl   + log(n_npl))   + (1 - Idx_npl)   * (-100)),
+  nlf(corr  ~ b + a + c + gamma * V_corr),
+  nlf(other ~ b + a     + gamma * V_other),
+  nlf(npl   ~ b),
+  b + a + c + gamma ~ 1,
+  nl = TRUE
+)
+```
+
+Stan code is generated successfully from `make_stancode()` (verified in
+the script).  The formula maps cleanly onto the existing bmm multinomial
+NLF infrastructure — this extension requires no custom Stan code.
+
+## 2.3  Identifiability
+
+$\gamma$ is identified if and only if $V_i$ varies across trials.  In
+a design where all trials have the same value assignment, $\gamma V_i$
+is absorbed into the intercept of $a$ or $c$.  A **VDR design** with at
+least two distinct value levels (e.g., 1 point vs 2 points) satisfies
+this requirement.
+
+The predicted effect is shown below (from `02_prototype_a_eu.R`):
+
+| $\gamma$ | $V_{\text{corr}}$ | $P(\text{correct})$ |
+|---|---|---|
+| 0 | 2 | 0.591 |
+| 0 | 1 | 0.591 |
+| 0.5 | 2 | 0.723 |
+| 0.5 | 1 | 0.504 |
+| 1.0 | 2 | 0.820 |
+| 1.0 | 1 | 0.396 |
+
+## 2.4  Relationship to existing bmm API
+
+The EU extension requires no structural API change: it is equivalent to
+including $V_i$ as a predictor in the activation sub-formula of the
+`bmmformula`:
+
+```r
+bmf(
+  correct ~ b + a + c,
+  other   ~ b + a,
+  npl     ~ b,
+  c     ~ 1 + (1 | subj),
+  a     ~ 1 + value + (1 | subj)   # 'value' is the point-value predictor
+)
+```
+
+The EU reading of this model is that $\gamma$ (the slope of `value`)
+measures utility-weighting of memory activation.  No new model
+constructor is needed; existing `m3()` with `version = "ss"` already
+supports this via the custom activation formula.
+
+---
+
+# 3  Prototype B — non-EU choice rule (Prelec probability weighting)
+
+**Source:** `03_prototype_b_prelec.R`
+
+## 3.1  Model
+
+The Prelec (1998) one-parameter weighting function transforms objective
+probabilities $p$ into subjective decision weights:
+
+$$
+w(p) = \exp\!\bigl(-(-\ln p)^\alpha\bigr), \quad \alpha > 0.
+$$
+
+$\alpha = 1$: identity ($w(p) = p$, equivalent to standard softmax).
+$\alpha < 1$: inverse S-shape — rare alternatives overweighted.
+$\alpha > 1$: S-shape — common alternatives overweighted.
+
+In the M3 context, the standard softmax uses $\ln n_i$ as the option-count
+adjustment.  Replacing this with the log Prelec weight of the proportion
+$p_i = n_i / N_{\text{total}}$ gives:
+
+$$
+P(i) \propto \exp\!\Bigl(a_i + \ln w(p_i)\Bigr) = \exp\!\Bigl(a_i - (-\ln p_i)^\alpha\Bigr).
+$$
+
+For $\alpha = 1$: $\ln w(p_i) = \ln p_i = \ln n_i - \ln N_{\text{total}}$,
+which reduces to standard softmax up to a constant absorbed into the intercept.
+
+## 3.2  brms specification
+
+```r
+prelec_formula <- bf(
+  Y | trials(nTrials) ~
+    Idx_corr  * (corr  + (-((-log(p_corr))^alpha)))  + (1-Idx_corr) *(-100),
+  nlf(muother ~ Idx_other*(other + (-((-log(p_other))^alpha))) + (1-Idx_other)*(-100)),
+  nlf(munpl   ~ Idx_npl  *(npl   + (-((-log(p_npl))^alpha)))   + (1-Idx_npl)  *(-100)),
+  nlf(corr ~ b + a + c), nlf(other ~ b + a), nlf(npl ~ b),
+  b + a + c + alpha ~ 1,
+  nl = TRUE
+)
+```
+
+$p_{\text{corr}}, p_{\text{other}}, p_{\text{npl}}$ are precomputed
+data columns ($n_i / N_{\text{total}}$).  Stan code parses successfully
+(verified with `make_stancode()`).
+
+## 3.3  Identifiability
+
+$\alpha$ is identified only when option *proportions* $p_i$ vary across
+trials.  In a **fixed-set-size design** (all trials have the same $n_i$),
+the Prelec weights are trial-constant and $\alpha$ is not identified
+(absorbed into activation intercepts).
+
+Designs that identify $\alpha$:
+
+- Mixed set-size conditions (e.g., 2 vs 6 "other" items)
+- Experiments with variable distractor counts across blocks
+
+In **typical complex-span and simple-span paradigms**, set size is constant
+within a trial block, so $\alpha$ would not be identified.
+
+Predicted effect of $\alpha$ on $P(\text{correct})$ for $n = (1, 4, 5)$
+(proportions $= 0.10, 0.40, 0.50$):
+
+| $\alpha$ | $P(\text{corr})$ | $P(\text{other})$ | $P(\text{npl})$ |
+|---|---|---|---|
+| 0.3 | 0.635 | 0.319 | 0.047 |
+| 0.7 | 0.500 | 0.431 | 0.069 |
+| **1.0** | **0.368** | **0.541** | **0.092** |
+| 1.5 | 0.144 | 0.724 | 0.132 |
+| 2.0 | 0.026 | 0.816 | 0.158 |
+
+For $\alpha < 1$ the rare correct item (proportion 0.10) is overweighted,
+substantially boosting $P(\text{correct})$.
+
+---
+
+# 4  Axiom violations and choice-rule comparison
+
+**Source:** `04_axiom_simulations.R`
+
+## 4.1  Axioms
+
+| Axiom | Softmax | Simple |
+|---|---|---|
+| IIA | ✓ | ✓ |
+| Regularity | ✓ | ✓ |
+| Weak stochastic transitivity | ✓ | ✓ |
+
+Both rules satisfy all three axioms.  They are members of the Luce
+random-utility family and differ only in how activation enters the
+strength function ($\exp(a_i)$ vs $a_i$).
+
+## 4.2  Where the rules differ
+
+The rules disagree on how $P(\text{correct})$ scales with the number of
+competitor items:
+
+| $n_{\text{other}}$ | Softmax $P(\text{corr})$ | Simple $P(\text{corr})$ |
+|---|---|---|
+| 1 | 0.619 | 0.544 |
+| 4 | 0.368 | 0.258 |
+| 8 | 0.239 | 0.152 |
+| 16 | 0.140 | 0.083 |
+
+The softmax predicts a shallower set-size effect than the simple rule
+for the same activation parameters.  This is directly testable: fit
+both rules to data with varying set sizes.
+
+## 4.3  IIA limitation
+
+Both rules enforce proportional stealing: adding a new alternative
+reduces all existing alternatives' probabilities proportionally.
+This conflicts with Debreu's (1960) similarity effect: near-duplicate
+competitors should mainly steal from each other.
+
+In working-memory designs, this matters when "other" items are all
+similar (same category, same valence).  If human data show
+super-proportional stealing from the "other" category when more "other"
+items are added (relative to "correct" and "npl"), neither M3 rule
+can account for it.
+
+---
+
+# 5  Parameter Recovery — Round 1 (pooled fixed-effects)
+
+**Source:** `05_parameter_recovery.R`
+
+Both prototypes were fitted on simulated data with known true parameters using
+brms 2.23.0 / CmdStan 2.39.0 (2 chains × 1000 iter, 500 warmup).
+
+## 5.1  Prototype A: EU activation
+
+**Design:** VDR with alternating high ($V = 2$) and low ($V = 1$) value trials,
+$N = 30$ subjects × 80 trials, $n = (1, 4, 5)$ items.
+**Note:** aggregated counts (10 responses per row); subject identity unused.
+
+| Parameter | True | Estimate | 95% CI |
+|---|---|---|---|
+| $a$ | 1.50 | 1.487 | [1.398, 1.584] |
+| $c$ | 2.00 | 1.998 | [1.966, 2.026] |
+| $\gamma$ | 0.80 | 0.803 | [0.774, 0.831] |
+
+All three parameters recovered within their 95% credible intervals.
+Max $\hat{R} = 1.003$ (excellent convergence).
+
+## 5.2  Prototype B: Prelec weighting
+
+**Design:** Mixed set-size ($n_{\text{other}} \in \{2, 6\}$, alternating),
+$N = 30$ subjects × 100 trials (aggregated counts).
+
+| Parameter | True | Estimate | 95% CI |
+|---|---|---|---|
+| $a$ | 1.50 | 1.504 | [1.447, 1.561] |
+| $c$ | 2.00 | 1.990 | [1.923, 2.056] |
+| $\alpha$ | 0.60 | 0.600 | [0.555, 0.643] |
+
+All parameters recovered within 95% CIs. Max $\hat{R} = 1.004$.
+
+**LOO comparison** (Prelec vs null standard softmax, data generated with
+$\alpha = 0.6 \neq 1$):
+
+| Model | $\Delta$ELPD | SE |
+|---|---|---|
+| Prelec | 0.0 | 0.0 |
+| Null (softmax) | −217.8 | 21.0 |
+
+---
+
+# 6  Parameter Recovery — Round 2 (realistic hierarchical)
+
+**Source:** `06_realistic_recovery.R`
+
+Round 1 used aggregated counts and ignored subject structure.
+Round 2 uses single categorical responses per trial with full random effects
+on $a$, $c$, and $\gamma / \alpha$.
+
+## 6.1  Prototype A: hierarchical EU recovery
+
+**Design grid:** $\gamma \in \{0, 0.2, 0.5, 0.8\}$, $N_{\text{trials}} \in
+\{50, 100, 200\}$, $N_{\text{subj}} = 30$, 5 replicates per cell.
+Random effects: $\text{SD}(a) = 0.3$, $\text{SD}(c) = 0.3$,
+$\text{SD}(\gamma) = 0.2$.
+
+The key diagnostic is the **false-positive rate at $\gamma = 0$** — the
+proportion of simulations where the 95% CI excludes zero even though the true
+value is zero. A well-calibrated model should show approximately 5% false
+positives.
+
+See `06_realistic_recovery.R` for full numeric results.
+
+**Summary of results (round 3 subset):** See §6.3 for measured values from the
+right-sized grid ($\gamma \in \{0, 0.5\}$, $N_{\text{trials}} = 100$, 5 replicates).
+
+Full-grid results for all four $\gamma$ values and all three $N_{\text{trials}}$ levels:
+**NOT YET TESTED** — `06_realistic_recovery.R` full grid has not been run end-to-end.
+
+## 6.2  Prototype B: hierarchical Prelec recovery
+
+**Design grid:** $\alpha \in \{0.4, 0.6, 1.0, 1.5\}$, same $N$ grid,
+$\text{SD}(\alpha) = 0.2$.
+Identifiability guard: set sizes alternate between 2 and 6 "other" items.
+
+The key diagnostic is the **false-positive rate at $\alpha = 1$** — the
+proportion of fits where the 95% CI excludes 1 (the null).
+
+**NOT YET TESTED** — Prototype B hierarchical grid has not been run.
+
+## 6.3  Round 3 reduced grid (measured values)
+
+Right-sized subset actually run: $\gamma \in \{0, 0.5\}$, $N_{\text{trials}} = 100$,
+5 replicates per cell (10 fits total). See §13.2 for the full per-replicate table.
+
+**Summary:**
+- $\gamma = 0$: false-positive rate = **0/5** (0%). All CIs include zero. Max R̂ ≤ 1.022.
+- $\gamma = 0.5$: coverage = **5/5** (100%). All CIs exclude zero. Max R̂ ≤ 1.014.
+
+---
+
+# 7  Power Utility: $u(V) = V^\rho$
+
+**Source:** `07_power_utility.R`
+
+Linear utility $\gamma V$ assumes proportional returns to value. Power utility
+$u(V) = V^\rho$ adds curvature: $\rho < 1$ gives concave utility
+(diminishing marginal returns); $\rho > 1$ gives convex utility.
+
+## 7.1  Model
+
+The activation formula becomes:
+
+$$
+a_i^{\text{corr}} = b + a + c + \gamma V_{\text{corr}}^\rho, \quad
+a_i^{\text{other}} = b + a + \gamma V_{\text{other}}^\rho.
+$$
+
+## 7.2  Identifiability of $(\gamma, \rho)$
+
+The key finding is that $\gamma$ and $\rho$ are **not jointly identified in a
+2-level VDR design** ($V \in \{1, 2\}$): many $(\gamma^*, \rho^*)$ pairs produce
+identical predicted probabilities, so the posterior is bimodal and the
+parameters are highly negatively correlated.
+
+**Minimum requirements for joint identification:**
+
+| Requirement | Detail |
+|---|---|
+| ≥ 3 distinct value levels | $V \in \{1, 3, 5\}$ or similar — 2 levels are insufficient |
+| ≥ 30 trials per value level | 90+ trials total; 120+ recommended |
+| Value range ≥ 4-fold | e.g., 1–5 or 1–10; avoid tight spacing |
+| Balanced design | All value levels in each condition |
+
+**NOT YET TESTED** — `07_power_utility.R` contains the simulation code but has
+not been run end-to-end with brms fits. The identifiability argument is supported
+analytically (the likelihood surface with 2 value levels is a ridge in $(\gamma, \rho)$
+space), but posterior-correlation and CI-width numbers are not yet measured.
+
+## 7.3  Practical note for VDR paradigms
+
+Most VDR studies use 4–6 point values drawn from 1–10, which is compatible with
+power-utility estimation. The critical requirement is that the value levels are
+sufficiently spread and the design is not dominated by a single value.
+
+---
+
+# 8  Decision-Stage vs Encoding-Stage Value: Model Confusion
+
+**Source:** `08_stage_confusion.R`
+
+Two competing accounts of value-driven memory:
+
+- **Model E (encoding-stage):** $\gamma$ weights the activation at encoding.
+  Higher-value items are remembered better *because* the encoding process
+  allocates more resources to them.
+- **Model D (decision-stage):** $\delta$ is an additive choice bias at
+  retrieval, independent of memory strength.
+
+## 8.1  Mathematical equivalence at the fixed-effects level
+
+In a pooled fixed-effects model, Model E and Model D are **mathematically
+identical**: both add $\text{param} \times V$ to the activation log-linear
+predictor. They cannot be distinguished from choice data alone in a standard
+VDR design without additional constraints.
+
+## 8.2  What distinguishes them
+
+| Separation mechanism | Model E prediction | Model D prediction |
+|---|---|---|
+| **Timing manipulation** | Value at ENCODING → large effect; value at RETRIEVAL → zero effect | Effect same regardless of timing |
+| **Individual differences** | $\text{cor}(c_i, \gamma_i) > 0$ (better encoders prioritise value more) | $\text{cor}(c_i, \delta_i) \approx 0$ |
+| **LOO in standard VDR** | Indistinguishable from Model D | Indistinguishable from Model E |
+
+The individual-differences approach is **detectable without a timing
+manipulation**: fitting a hierarchical model and examining the posterior
+correlation between $c_i$ and $\gamma_i / \delta_i$ across subjects can
+distinguish encoding from decision prioritisation.
+
+## 8.3  Confusion matrix results
+
+**NOT YET TESTED** — `08_stage_confusion.R` contains the simulation code but has
+not been run with brms LOO fits. The mathematical equivalence result (§8.1) is
+analytic and verified; the claim that LOO selects at chance level in standard VDR
+designs is a consequence of this equivalence but has not been confirmed numerically.
+
+See `08_stage_confusion.R` for the simulation design.
+
+**Design recommendation:** to separate Models E and D, use a within-subject
+manipulation where value is revealed at study in one condition and at test
+in another. Model E predicts a study-timing advantage; Model D does not.
+
+---
+
+# 9  Composite Prospect-Theory M3
+
+**Source:** `09_composite_pt.R`
+
+Prototypes A and B compose into a full prospect-theory M3:
+
+$$
+\log P(i) \propto a_i + \gamma V_i + \ln w(p_i), \quad
+w(p) = \exp\!\bigl(-(-\ln p)^\alpha\bigr).
+$$
+
+## 9.1  Joint identifiability of $(\gamma, \alpha)$
+
+The composite model requires **both** design manipulations:
+
+| Parameter | Requires | Result if absent |
+|---|---|---|
+| $\gamma$ | Variation in $V_i$ | Flat posterior; absorbed into $a$ intercept |
+| $\alpha$ | Variation in option counts $n_i$ | Flat posterior; absorbed into $a$ intercept |
+
+When **both** manipulations are present, $\gamma$ and $\alpha$ are predicted to be
+nearly orthogonal; when either is absent, the corresponding parameter is unidentified.
+
+**NOT YET TESTED** — `09_composite_pt.R` contains the simulation code but has not
+been run with brms fits. Claims about posterior correlation magnitude and CI-width
+ratios (e.g., "$> 2\times$ wider") are not yet supported by measured numbers.
+
+## 9.2  Practical recommendation
+
+A composite PT M3 is estimable in a design that combines:
+
+1. VDR value manipulation ($V \ge 2$ distinct levels)
+2. Variable option counts ($n_{\text{other}}$ varied across trials)
+
+Such a design is non-standard but not unrealistic: value-directed tasks with
+variable study list lengths (e.g., 2 vs. 6 competitors) would identify both
+parameters. The boundary condition is that neither manipulation can be reduced
+to a constant without losing identifiability of the corresponding parameter.
+
+---
+
+# 10  bmm API Integration Spike
+
+**Source:** `10_bmm_api_example.R`
+
+## 10.1  Claim under test
+
+The README §6.2 claims: "the EU extension requires no structural API change —
+it is equivalent to including $V_i$ as a predictor in the activation
+sub-formula of the `bmmformula`."
+
+## 10.2  Specification via `m3()` + `bmf()`
+
+```r
+model <- m3(
+  resp_cats   = c("corr", "other", "npl"),
+  num_options = c("n_corr", "n_other", "n_npl"),
+  choice_rule = "softmax",
+  version     = "custom"
+)
+model$links <- list(a = "identity", c = "identity", gamma = "identity")
+
+formula <- bmf(
+  corr  ~ b + a + c + gamma * V_corr,   # EU: value enters activation
+  other ~ b + a     + gamma * V_other,
+  npl   ~ b,
+  a     ~ 1 + (1 | subj),
+  c     ~ 1 + (1 | subj),
+  gamma ~ 1 + (1 | subj)
+)
+```
+
+## 10.3  Verification results
+
+The `10_bmm_api_example.R` script:
+
+1. Generates the brms formula via `bmm:::configure_model()` and confirms that
+   the resulting Stan code contains `gamma` and `V_corr`.
+2. Fits the model via `bmm()` and verifies that $\gamma$ is recovered (95% CI
+   covers true value of 0.8).
+3. Confirms that the default prior for `gamma` (via `default_prior()`) is
+   sensible — if no explicit prior is provided, bmm falls back to
+   `normal(1, 1)` on the identity scale; a user-specified
+   `prior(normal(0, 1), nlpar = "gamma", class = "b")` is recommended.
+
+**Conclusion:** The EU extension is API-compatible. No changes to `R/` are
+required. The script serves as the seed for a future vignette section.
+
+## 10.4  Prior recommendation for value slope
+
+| Scenario | Recommended prior |
+|---|---|
+| No prior knowledge | `prior(normal(0, 1), nlpar = "gamma", class = "b")` |
+| Value range 1–2 pts | `prior(normal(0, 0.5), nlpar = "gamma", class = "b")` |
+| Value range 1–10 pts | `prior(normal(0, 0.3), nlpar = "gamma", class = "b")` |
+| Random slope across subj | `prior(normal(0, 0.3), nlpar = "gamma", class = "sd")` |
+
+Positive $\gamma$ = value-directed recall; $\gamma = 0$ = standard M3;
+$\gamma < 0$ = value-avoidance (rare but possible).
+
+---
+
+# 11  Recommendation (updated)
+
+## 11.1  Go/no-go summary
+
+| Extension | Identifiability | Design requirement | Recovery (round 1) | Hardened (round 3) | Verdict |
+|---|---|---|---|---|---|
+| **EU activation** ($\gamma$) | High | VDR, ≥ 2 value levels | ✅ exact recovery, R̂ = 1.003 | ✅ FP=0/5; TP=5/5; R̂ ≤ 1.022 (§13.2) | **GO** |
+| **Power utility** ($\gamma$, $\rho$) | Conditional | ≥ 3 value levels, wide range | — | NOT YET TESTED | **CONDITIONAL GO** |
+| **Prelec weighting** ($\alpha$) | Conditional | Variable option counts | ✅ ΔELPD = 218 | NOT YET TESTED | **CONDITIONAL GO** |
+| **Composite PT** ($\gamma$, $\alpha$) | Conditional | Both VDR + variable $n$ | — | NOT YET TESTED | **CONDITIONAL GO** |
+| **Decision vs encoding** | Not from data alone | Timing manipulation OR indiv. diff. | — | Math equiv. confirmed; LOO NOT YET TESTED | **DESIGN REQUIRED** |
+
+## 11.2  Prototype A (EU activation): GO — confirmed
+
+The EU extension is:
+
+- API-compatible with existing `m3(version = "custom")` (verified in WP5)
+- Recovers $\gamma$ with appropriate false-positive control at $\gamma = 0$
+  in hierarchical designs (WP1)
+- Well-specified even without power-utility curvature, when only 2 value
+  levels are available
+
+**Recommended next step:** Add a paragraph to the `m3()` help page and a
+vignette section demonstrating `gamma ~ 1 + (1 | subj)` in a VDR analysis.
+The seed code is in `10_bmm_api_example.R`.
+
+## 11.3  Power utility ($\rho$): CONDITIONAL GO
+
+$\rho$ is identifiable with ≥ 3 distinct value levels and a wide value range.
+Most published VDR designs use 4–6 discrete values, so $\rho$ is estimable
+in principle. However:
+
+- $(\gamma, \rho)$ are highly collinear in 2-level designs (do not add $\rho$
+  without ≥ 3 levels)
+- Requires explicit `prior(lognormal(0, 0.5), nlpar = "rho", class = "b", lb = 0.05)`
+
+**Recommended next step:** Only implement when a collaborator has a 3+-level
+VDR dataset. The `07_power_utility.R` script is the prototype.
+
+## 11.4  Prelec weighting ($\alpha$): CONDITIONAL GO — unchanged
+
+Design requirement (variable set sizes) is non-standard. Hold until a
+concrete use case arises.
+
+## 11.5  Composite PT: CONDITIONAL GO
+
+Requires both VDR and variable set sizes. High scientific value for prospect
+theory in WM but demanding experimentally. Boundary conditions documented in
+`09_composite_pt.R`.
+
+## 11.6  Stage distinction: DESIGN REQUIRED
+
+Standard VDR data cannot separate encoding- from decision-stage value effects
+using LOO alone. Individual-differences correlation ($c_i$ vs $\gamma_i$)
+provides a partial separation. A timing manipulation (value at study vs. test)
+provides a clean separation.
+
+**Recommended:** Document this confound in the `m3` vignette so users who run
+VDR analyses interpret $\gamma$ as a net value effect, not a pure encoding
+effect.
+
+## 11.7  API sketch (Prototype A — ready to document)
+
+Note: `m3()` accepts `links` directly (R/model_m3.R:90); no `model$links` mutation needed.
+
+```r
+library(bmm)
+
+# EU-weighted VDR analysis — links passed at construction time
+model <- m3(
+  resp_cats   = c("corr", "other", "npl"),
+  num_options = c("n_corr", "n_other", "n_npl"),
+  choice_rule = "softmax",
+  version     = "custom",
+  links       = list(a = "identity", c = "identity", gamma = "identity")
+)
+
+formula <- bmf(
+  corr  ~ b + a + c + gamma * V_corr,
+  other ~ b + a     + gamma * V_other,
+  npl   ~ b,
+  a     ~ 1 + (1 | subj),
+  c     ~ 1 + (1 | subj),
+  gamma ~ 1 + (1 | subj)   # value-weighting slope
+)
+
+priors <- c(
+  prior(normal(0, 1),   nlpar = "gamma", class = "b"),
+  prior(normal(0, 0.3), nlpar = "gamma", class = "sd")
+)
+
+fit <- bmm(formula = formula, data = vdr_data, model = model, prior = priors)
+# gamma_Intercept > 0: high-value items recalled more often
+```
+
+## 11.8  API sketch (Prototype B — contingent on use case)
+
+```r
+# Prelec weighting (requires variable n_i across trials)
+m3(
+  resp_cats   = c("corr", "other", "npl"),
+  num_options = c("n_corr", "n_other", "n_npl"),
+  choice_rule = "prelec"   # would require new branch in glue_choice_rule_functions()
+)
+# check_model.m3 should warn when n_i is constant within the dataset.
+```
+
+---
+
+# 12  Relation to Discrete-Choice Econometrics
+
+The formal mapping in §1 places the M3 squarely within McFadden's (1974)
+**random-utility maximisation (RUM)** framework, also known as the conditional
+logit model.  This section makes the vocabulary correspondence explicit for
+readers from econometrics or judgment-and-decision-making (JDM) backgrounds.
+
+## 12.1  M3 quantities as RUM counterparts
+
+In the discrete-choice literature, agent $j$ chooses alternative $i$ to
+maximise utility:
+
+$$
+U_{ij} = V_{ij} + \varepsilon_{ij}, \quad
+\varepsilon_{ij} \overset{\text{iid}}{\sim} \text{Gumbel}(0, 1).
+$$
+
+The resulting choice probability is:
+
+$$
+P(i \mid j) = \frac{\exp(V_{ij})}{\sum_k \exp(V_{kj})}.
+$$
+
+The M3 softmax choice rule maps directly onto this framework:
+
+| M3 quantity | RUM counterpart | Interpretation |
+|---|---|---|
+| Activation $a_i$ | Systematic utility $V_{ij}$ | Mean log-strength of memory for category $i$ |
+| $\ln n_i$ (option count) | Log-frequency term | Set-size correction for proportional stealing |
+| Activation scale (SD of $a_i$) | 1/Gumbel noise scale | Inverse temperature; decisiveness |
+| $b$ (background activation) | Choice-specific constant | Scale identification constraint |
+| $\gamma V_i$ (EU extension) | Value-varying utility component | Linear value weighting of systematic utility |
+
+**The M3 is therefore a restricted conditional logit** in which systematic
+utility is decomposed into memory parameters ($a$, $c$, $b$) rather than
+observed option attributes.  The EU extension adds an observed attribute ($V_i$)
+to the systematic utility, recovering a standard conditional-logit predictor.
+
+## 12.2  What is and is not claimed
+
+**IS claimed:**
+- The M3 likelihood is identical to the multinomial logit likelihood.  Any
+  software that fits MNL models can fit M3 (with the appropriate constraint on $b$).
+- The EU extension ($\gamma V_i$) is estimable within the conditional-logit
+  framework; the parameter $\gamma$ has the standard MNL interpretation as a
+  marginal (dis)utility per unit of value.
+- The hierarchical M3 (random effects on $a$, $c$, $\gamma$) corresponds to
+  a **mixed logit** / random-parameters logit (Train, 2009, ch. 6).
+
+**IS NOT claimed:**
+- That the M3 models subjective preference in the normative (vNM) sense.  As
+  §1.3 shows, the softmax M3 is interval-scale, not ratio-scale, so vNM
+  uniqueness fails.  $\gamma$ measures how strongly value modulates memory
+  activation, not a subjective utility function over outcomes.
+- That the M3 replaces utility theory.  The reverse is true: utility theory
+  provides a **principled parameterisation** of the systematic utility component.
+  The M3 memory parameters ($a$, $c$) supply the non-attribute-based part of
+  utility that standard conditional logit cannot capture in WM tasks.
+
+## 12.3  Relation to prospect theory estimation
+
+Nilsson, Rieskamp & Wagenmakers (2011) estimated hierarchical prospect-theory
+models (power utility + Prelec weighting) using a Bayesian hierarchical framework
+identical in structure to the M3 approach here.  The key difference is domain:
+
+- **Nilsson et al.**: binary lottery choice; utility comes from option attributes
+  (outcome $x$, probability $p$).
+- **M3 utility extension**: categorical WM retrieval; utility comes from memory
+  strength modulated by value.
+
+The choice-rule layer (logit / softmax) is shared.  The model-constructor layer
+is separate (see DESIGN_utility_api.md §WP4: binary PT is a sibling family).
+
+## 12.4  Vocabulary for the m3_utility() wrapper
+
+The WP2 wrapper (`11_utility_wrapper.R`) uses econometric vocabulary deliberately:
+
+| Argument | Econometric meaning |
+|---|---|
+| `value_cols` | Observed attribute columns entering systematic utility |
+| `utility = "linear"` | Linear-in-parameters systematic utility ($V_{ij} = \gamma x_{ij}$) |
+| `utility = "power"` | Power systematic utility ($V_{ij} = \gamma x_{ij}^\rho$) |
+| `weighting = "prelec"` | Non-linear probability weighting of option-count frequencies |
+
+## 12.5  Key references
+
+- McFadden, D. (1974). Conditional logit analysis of qualitative choice behavior.
+  In P. Zarembka (Ed.), *Frontiers in Econometrics* (pp. 105–142). Academic Press.
+- Train, K. E. (2009). *Discrete Choice Methods with Simulation* (2nd ed.).
+  Cambridge University Press.
+  [Free online: eml.berkeley.edu/books/choice2.html]
+- Nilsson, H., Rieskamp, J., & Wagenmakers, E.-J. (2011). Hierarchical Bayesian
+  parameter estimation for cumulative prospect theory. *Journal of Mathematical
+  Psychology*, 55(2), 84–93.
+- Luce, R. D. (1959). *Individual Choice Behavior*. Wiley.
+
+---
+
+# 13  Parameter Recovery — Round 3 (right-sized grid)
+
+**Sources:** `12_binary_choice_pt.R` (WP4), `06_realistic_recovery.R` reduced grid (WP1).
+
+This section is filled in as fits complete (Step 2 and Step 3 of the round-3 redo).
+
+## 13.1  WP4: Binary prospect-theory recovery
+
+**Design:** Hierarchical binary PT (Nilsson et al. 2011), N=30×100 trials.
+u(x) = x^ρ, Prelec w(p), logit sensitivity λ. 2 chains × 1000 iter.
+Results in `results/12_binary_pt_recovery.csv`.
+
+| Parameter | True | Estimate | 95% CI | Covered | Max R̂ |
+|---|---|---|---|---|---|
+| $\rho$ | 0.70 | 0.686 | [0.554, 0.829] | ✅ | 1.015 |
+| $\alpha$ | 0.65 | 0.618 | [0.468, 0.792] | ✅ | 1.015 |
+| $\lambda$ | 2.50 | 3.068 | [1.948, 4.622] | ✅ | 1.015 |
+
+3 divergences (0.3%). All three parameters recovered within 95% CI.
+Note: $\lambda$ is upward-biased (3.07 vs 2.50); the true value falls
+within the wide CI, consistent with identifiable but imprecise recovery
+at N=30×100. 2-cat M3 = logistic verified at machine precision.
+
+## 13.2  WP1: EU activation hierarchical grid
+
+Right-sized grid: $\gamma \in \{0, 0.5\}$, $N_{\text{trials}} = 100$, 5 replicates/cell.
+Hierarchical truth and model: random effects on $a$, $c$, $\gamma$
+(SDs 0.3/0.3/0.2). 2 chains × 1000 iter, N = 30 subjects.
+Results in `results/wp1_gamma*.csv`.
+
+| True $\gamma$ | Rep | Estimate | 95% CI | Excl. zero | Covered | Max R̂ |
+|---|---|---|---|---|---|---|
+| 0.0 | 1 | −0.018 | [−0.130, 0.081] | FALSE | ✅ | 1.022 |
+| 0.0 | 2 | −0.058 | [−0.191, 0.077] | FALSE | ✅ | 1.015 |
+| 0.0 | 3 | 0.068 | [−0.023, 0.151] | FALSE | ✅ | 1.009 |
+| 0.0 | 4 | −0.010 | [−0.112, 0.090] | FALSE | ✅ | 1.011 |
+| 0.0 | 5 | −0.045 | [−0.150, 0.051] | FALSE | ✅ | 1.021 |
+| 0.5 | 1 | 0.549 | [0.437, 0.657] | TRUE | ✅ | 1.012 |
+| 0.5 | 2 | 0.582 | [0.473, 0.689] | TRUE | ✅ | 1.013 |
+| 0.5 | 3 | 0.571 | [0.462, 0.679] | TRUE | ✅ | 1.014 |
+| 0.5 | 4 | 0.447 | [0.341, 0.552] | TRUE | ✅ | 1.010 |
+| 0.5 | 5 | 0.469 | [0.357, 0.583] | TRUE | ✅ | 1.011 |
+
+**False-positive count at $\gamma = 0$: 0 / 5** (observed rate = 0%; 95% binomial
+CI includes 0.05).
+
+**Coverage at $\gamma = 0.5$: 5/5** (100%).
+
+**True-positive count at $\gamma = 0.5$: 5 / 5** (all CIs exclude zero).
+
+---
+
+# 14  Round 5: API Architecture Analysis
+
+**Sources:** `14_requirements_inventory.md`, `15_user_surface.R`, `16_identifiability_guards.R`,
+`DESIGN_utility_api.md` (revised).
+
+## 14.1  Requirements inventory
+
+Seven requirements enumerated in `14_requirements_inventory.md`.
+Priority by severity:
+
+| # | Requirement | Stage | Severity |
+|---|---|---|---|
+| R1 | Per-category activation formula (shared-slope trap) | check_formula | **silent-wrong** |
+| R4 | Design-dependent identifiability guards | check_data | **silent-wrong** |
+| R5 | Binary PT per-option attribute data | constructor + check_data | runtime error |
+| R3 | Identity links (undocumented) | constructor | runtime error |
+| R2 | Default priors for $\gamma$, $\rho$, $\alpha$ | default_priors | friction |
+| R6 | Utility × weighting composition | construction + formula | friction |
+| R7 | Parameter labelling in `summary()` | postprocess | friction |
+
+Critical finding: R1 and R4 are **silent-wrong** (model runs but answers wrong question
+or posterior is flat) — these are the priority targets for the production implementation.
+
+## 14.2  Architecture coverage matrix
+
+| Requirement | A exploration | A production | B version="utility" | C sibling |
+|---|---|---|---|---|
+| R1 formula trap | ✅ via generator | ✅ | ❌¹ | ✅ |
+| R2 priors | ✅ | ✅ | ✅ | ✅ |
+| R3 links | ✅ | ✅ | ✅ | ✅ |
+| R4 ident. guards | ❌ manual only | ✅ `check_data.m3_utility` | ~ | ✅ |
+| R5 binary PT | ❌ | ❌ | ❌ | ✅ |
+| R6 composition | ✅ | ✅ | ❌ | ✅ |
+| R7 labelling | friction | ~ | friction | ✅ |
+
+¹ Requires updating `construct_m3_act_funs()` — equivalent effort to Option A production.
+
+**Revised recommendation:** Option A production (staged), not the exploration prototype.
+Stage 1: move to `R/model_m3_utility.R` with `"m3_utility"` subclass +
+`check_data.m3_utility` for identifiability guards → resolves R1–R4, R6.
+Stage 2: `binary_pt()` sibling constructor (separate PR) → resolves R5.
+Full rationale in `DESIGN_utility_api.md` §6.
+
+## 14.3  Smoke fits: `m3_utility()` pipeline verified
+
+**Architecture A, UC1 — EU VDR** (N=20×60, 1 chain × 1000 iter, $\gamma_{\text{true}}=0.8$)
+Results in `results/15_smoke_A_UC1.csv`.
+
+| Parameter | True | Estimate | 95% CI | Covered | Max R̂ | Divs |
+|---|---|---|---|---|---|---|
+| $a$ | 2.0 | 2.008 | [0.845, 3.134] | ✅ | 1.016 | 4 |
+| $c$ | 3.0 | 2.954 | [2.767, 3.140] | ✅ | 1.016 | 4 |
+| $\gamma$ | 0.8 | 1.330 | [0.463, 2.768] | ✅ | 1.016 | 4 |
+
+Parameters correctly labelled (`a_Intercept`, `c_Intercept`, `gamma_Intercept`).
+4 divergences (1%) — minor; `adapt_delta = 0.95` recommended for production use.
+$\gamma$ point estimate is upward-biased but true value is within 95% CI.
+Confirmed: `m3_utility()` wrapper + `m3_utility_formula()` pipeline produces
+correct Stan code and samples all utility parameters.
+
+**Architecture A, UC2 — Composite PT** (N=20×80, variable set sizes, 1 chain × 1000 iter)
+Results in `results/15_smoke_A_UC2.csv`.
+
+| Parameter | True | Estimate | 95% CI | Covered | Max R̂ | Divs |
+|---|---|---|---|---|---|---|
+| $a$ | 2.0 | 2.907 | [1.468, 4.484] | ✅ | 1.004 | 30 |
+| $c$ | 3.0 | 3.592 | [3.359, 3.835] | ❌² | 1.004 | 30 |
+| $\gamma$ | 0.6 | 1.118 | [0.147, 2.629] | ✅ | 1.004 | 30 |
+| $\alpha$ | 0.7 | 0.866 | [0.303, 2.037] | ✅ | 1.004 | 30 |
+
+30 divergences (6%) — the Prelec term creates a challenging posterior geometry;
+`adapt_delta = 0.95` or `0.99` is needed for production composite PT fits.
+Prior bug discovered and fixed: `lognormal(0, 0.5)` is wrong for log-link parameters
+(places a lower bound on the linear predictor); corrected to `normal(0, 0.5)` in
+`11_utility_wrapper.R`.
+² Single coverage miss for $c$ with 30 divergences and small N is expected.
+
+## 14.4  Identifiability guards
+
+Three guards prototyped and verified in `16_identifiability_guards.R`:
+
+| Guard | Trigger | Fires on deficient data | Passes on adequate data |
+|---|---|---|---|
+| G1: power utility | $<3$ distinct value levels | ✅ CONFIRMED | ✅ CONFIRMED |
+| G2: Prelec weighting | constant set size | ✅ CONFIRMED | ✅ CONFIRMED |
+| G3: EU slope | constant value column | ✅ CONFIRMED | ✅ CONFIRMED |
+
+In Architecture A exploration: guards must be called manually via
+`check_utility_design(model, data)`. In Architecture A production (with
+`"m3_utility"` subclass in `R/`): `check_data.m3_utility` fires automatically
+via S3 dispatch when `bmm()` is called.
+
+---
+
+# 15  Round 6: empirical identification evidence
+
+Round 6 (WP1–WP5) provides the fitted evidence that was pending in round 5.
+All fits use `backend = "cmdstanr"`.  Result CSVs are in `results/`.
+
+## 15.1  WP1 — Power utility: 3-level vs 2-level design (guard G1)
+
+**Script:** `17_power_utility_recovery.R`
+**Results:** `results/17_power_utility_3lev.csv`, `results/17_power_utility_2lev.csv`
+**True parameters:** $\gamma = 0.50$, $\rho = 0.70$, $N = 30$ subjects, 2 chains × 1000 iter.
+
+| Design | Levels | $\hat\gamma$ [95% CI] | $\hat\rho$ [95% CI] | $\gamma$ covered | $\rho$ covered | $\rho$ CI width | Divs |
+|---|---|---|---|---|---|---|---|
+| 3-level | $V \in \{1,3,5\}$ | 0.543 [0.202, 1.131] | 0.728 [0.412, 1.151] | ✅ | ✅ | 0.739 | 10 |
+| 2-level | $V \in \{1,2\}$ | 0.426 [0.129, 1.000] | 0.817 [0.404, 1.316] | ✅ | ✅ | 0.912 | 34 |
+
+**CI width ratio** (2-level / 3-level): $\rho$ = 1.2×; $\gamma$ = 0.9×.
+
+**Interpretation.**  Both designs recover $(\gamma, \rho)$ jointly with 95% coverage at
+$N = 30 \times 90$ (3-level) and $N = 30 \times 80$ (2-level).  The 1.2× ratio for
+$\rho$ is below the hypothesised 1.5× threshold.
+
+**Guard G1 revision (round 7):** Guard G1 is demoted from `stop()` to `warning()` and
+the trigger criterion is changed from "count of levels" to "value range ratio"
+($\max(V) / \min(V) \geq 3$).  Rationale: (a) one fit per design is insufficient to
+justify a hard error; (b) the 1.2× width increase does not unambiguously justify stopping
+the run; (c) the key diagnostic is the range ratio (very small range $\to$ nearly
+linear power effect $\to$ aliasing), not the number of distinct levels per se.  See
+`16_identifiability_guards.R` (round 7 revision: `check_power_utility_ident_v2`).
+
+---
+
+## 15.2  WP2 — Hierarchical Prelec: alpha recovery (guard G2)
+
+**Script:** `18_prelec_hierarchical.R`
+**Results:** `results/18_prelec_alpha06_rep{1,2}.csv`, `results/18_prelec_alpha10_rep{1,2}.csv`
+**Design:** $N = 30 \times 90$, $n_{\text{other}} \in \{2, 4, 6\}$, 2 chains × 1000 iter.
+
+| Fit | $\alpha_{\text{true}}$ | $\hat\alpha$ [95% CI] | Covered | Excl. 1.0 | Divs | R̂ |
+|---|---|---|---|---|---|---|
+| rep 1 | 0.60 | 0.598 [0.411, 0.765] | ✅ | ✅ (true positive) | 0 | 1.011 |
+| rep 2 | 0.60 | 0.521 [0.351, 0.683] | ✅ | ✅ | 0 | 1.006 |
+| rep 1 | 1.00 | 0.929 [0.806, 1.049] | ✅ | ❌ (no false positive) | 0 | 1.005 |
+| rep 2 | 1.00 | 1.001 [0.887, 1.106] | ✅ | ❌ | 0 | 1.004 |
+
+**Summary:** 0 divergences across all 4 fits.  False positive rate at $\alpha = 1.0$ (null): 0/2.
+True-positive rate (CI excludes 1.0 when $\alpha_{\text{true}} = 0.6$): 2/2.
+
+**Guard G2 validated.**  Variable set sizes ($n_{\text{other}} \in \{2,4,6\}$) are
+sufficient to identify $\alpha$ in the Prelec weighting model.
+
+---
+
+## 15.3  WP3 — Composite PT: c-alpha confound diagnosis (adapt_delta = 0.95)
+
+**Script:** `19_composite_pt_proper.R`
+**Results:** `results/19_composite_pt_delta95.csv`, `results/19_composite_pt_diagnosis.csv`
+**Design:** Full 2×2 (value × set-size), $N = 30 \times 120$, 4 chains × 1000 iter, `adapt_delta = 0.95`.
+**True:** $\gamma = 0.6$, $\alpha = 0.7$, $a = 2.0$, $c = 3.0$.
+
+| Parameter | True | Estimate | 95% CI | Covered | CI width |
+|---|---|---|---|---|---|
+| $a$ | 2.0 | 2.167 | [1.679, 2.704] | ✅ | 1.025 |
+| $c$ | 3.0 | 2.847 | [2.576, 3.121] | ✅ | 0.545 |
+| $\gamma$ | 0.6 | 0.559 | [0.438, 0.682] | ✅ | 0.244 |
+| $\alpha$ | 0.7 | 0.578 | [0.391, 0.739] | ✅ | 0.348 |
+
+0 divergences; max R̂ = 1.003.  **All parameters covered.**
+
+**Posterior correlation diagnosis:**
+
+| Pair | Correlation | Interpretation |
+|---|---|---|
+| $\text{cor}(c, \alpha)$ | **0.906** | Strong positive confound: $\alpha \downarrow$ forces $c \uparrow$ |
+| $\text{cor}(c, \gamma)$ | 0.263 | Weak |
+
+**Key finding:**
+
+The $c$-coverage failure in smoke fit 2 (round 5: $\hat c = 3.59$, true = 3.0, NOT COVERED,
+30 divergences, $N = 20 \times 80$, 1 chain) was a **sampler artifact**, not a structural
+misspecification.  With `adapt_delta = 0.95`, 4 chains, and $N = 30 \times 120$, $c$ is
+covered at 3.0.
+
+The confound ($\text{cor}(c, \alpha) = 0.906$) is real — the Prelec parameter $\alpha$ and the
+correction-boost $c$ trade off in the posterior.  However, the confound does not prevent
+recovery when the sampler explores the posterior adequately.
+
+**Design recommendation:** Use `adapt_delta >= 0.95` and $N \geq 30 \times 100$ for composite PT
+models.  With smaller $N$ or fewer chains, the $c$-$\alpha$ confound can push $c$ outside the
+true interval.
+
+---
+
+## 15.4  WP4 — Stage confusion: LOO cross-tabulation
+
+**Script:** `20_stage_confusion_loo.R`
+**Results:** `results/20_stage_confusion.csv`
+**Design:** 2 reps per generating model, $N = 30 \times 60$, 2 chains × 1000 iter.
+
+**2×2 cross-tabulation of LOO winners:**
+
+| Gen. model | LOO winner | ELPD diff | Interpretation |
+|---|---|---|---|
+| E (rep 1) | D | −0.15 | Negligible |
+| D (rep 1) | D | −0.16 | Negligible |
+| E (rep 2) | D | −0.11 | Negligible |
+| D (rep 2) | D | −0.19 | Negligible |
+
+Median $|\text{ELPD diff}|$ = 0.15.  Model D wins all 4 comparisons by a margin that is
+substantively indistinguishable from zero.
+
+**Conclusion:**  Model E (encoding-stage value effect, $\gamma$ correlated with $c$) and
+Model D (decision-stage, $\delta$ independent of $c$) are **mathematically identical** at
+the fixed-effects level.  LOO cannot separate them in any design that does not manipulate
+*when* value information is available (encoding time vs retrieval time).  This confirms the
+analytic argument in `08_stage_confusion.R`.
+
+**Design implication:** Researchers wanting to test encoding vs decision stage must use a
+design manipulation: e.g., presenting value cues only at encoding, or only at retrieval,
+in separate blocks.
+
+---
+
+## 15.5  WP5 — Welfare-weight use case (Gross et al. 2025)
+
+**Script:** `21_welfare_weight.R`
+**Results:** `results/21_model_d_recovery.csv`, `results/21_model_ea_recovery.csv`,
+`results/21_welfare_reparam.csv`
+**True:** $w_i = 0.60$, $w_o = 0.30$, payoff matrix from Gross et al. 2025.
+**Note (round 7):** Two of the three new requirements documented in round 6 (R9, R10)
+were incorrect. See corrections below and in `14_requirements_inventory.md`.
+
+### Payoff structure
+
+| Option | Payoff formula | True utility |
+|---|---|---|
+| keep | 1.0 (numeraire) | 1.00 |
+| ingroup | $0.5 + w_i$ | 1.10 |
+| universal | $0.3 + 0.6 w_i + 0.9 w_o$ | 0.93 |
+
+**Note on near-indifference:** The true utilities (1.00, 1.10, 0.93) differ by at most
+17% from each other. This near-indifference regime strongly amplifies noise through
+the inverse reparametrization transform and is the primary cause of the recovery
+difficulties reported below.
+
+### Model D reparametrization
+
+The standard M3 softmax model (Model D) is numerically equivalent to the E_D (Luce rule)
+via the reparametrization:
+$$
+\alpha_D = \log(0.5 + w_i) = \log(1.10) \approx 0.0953
+$$
+$$
+\beta_D = \log(U_{\text{universal}}) - \alpha_D = \log(0.93) - \log(1.10) \approx -0.168
+$$
+
+### Structural equivalence check
+
+| Model | Mean log-lik | $\Delta$ |
+|---|---|---|
+| Model D (softmax) | −1.0967 | — |
+| E_A (payoff-constrained NLF) | −1.0968 | −0.000018 |
+
+The near-zero Δlog-lik confirms Model D and E_A are effectively reparametrizations at
+the **population level** — they assign the same likelihood to the data.
+
+### E_A parameter recovery (full table from results/21_model_ea_recovery.csv)
+
+| Parameter | True | Estimate | 95% CI | Covered | Max R̂ | Divs |
+|---|---|---|---|---|---|---|
+| $c$ (ingroup weight) | 0.60 | 0.689 | [0.552, 0.836] | ✅ | 1.005 | 0 |
+| $u$ (outgroup contribution) | 0.27 | 0.458 | [0.347, 0.577] | **❌** | 1.005 | 0 |
+
+$u$ is **NOT covered** (true 0.27 is below the 95% CI lower bound of 0.347).
+
+### Two-cause diagnosis of $u$ non-coverage
+
+1. **Near-indifference utilities.** The true utilities (1.00/1.10/0.93) are all within
+   17% of each other. The inverse transforms $\hat{w}_i = \exp(\hat\alpha_D) - 0.5$
+   and $\hat{w}_o = (\exp(\hat\alpha_D + \hat\beta_D) - 0.3 - 0.6\hat{w}_i) / 0.9$
+   involve division by small-ish denominators (0.9) and addition of small terms,
+   so even modest estimation noise in $\alpha_D$/$\beta_D$ maps to large errors in $w_o$.
+   The reparametrisation back-transform (`results/21_welfare_reparam.csv`) confirms:
+   $\hat{w}_o = 0.488$ vs. true 0.30 (63% upward bias).
+
+2. **Prior misspecification.** The `lognormal(0, 0.5)` prior on $u$ in the E_A fit
+   places median = $e^0 = 1.0$. The true value is $u = 0.9 \times w_o = 0.9 \times 0.30
+   = 0.27$, which is $\log(0.27) - 0 = -1.31$ standard deviations below the prior
+   mean on the log scale (z-score ≈ −2.62). The prior pulls estimates strongly toward 1.0.
+   This miscentred prior would not be used in practice — a welfare-weight informed prior
+   would centre near 0.3 with SD 0.2.
+
+**Cross-reference:** Round 7 WP1 (`22_welfare_bmm_simple.R`) tests the same bmm machinery
+with well-separated utilities ($w_i = 1.2, w_o = 0.8$; utilities 1.00/1.70/1.74) and
+correct lower-bounded priors. See §16.1 for results.
+
+### Stage-1 compatibility (corrected from round 6)
+
+Round 6 identified three new requirements R8–R10. R9 and R10 were incorrect; only R8
+is a genuine new requirement.
+
+| Req. | Description | Severity | Status |
+|---|---|---|---|
+| R8 | Fixed payoff coefficients (0.3, 0.6, 0.9) in NLF activation formula | silent-wrong | ✅ genuine, Stage-2 |
+| R9 | **CORRECTED:** Positivity hazard (identity link + simple rule → log(negative)) | runtime error | guard G4 in Stage-1 |
+| R10 | **CORRECTED:** Numeraire fixing is documented gap only (`fixed_parameters$b` works) | friction | auto-set in Stage-1 |
+
+**Correction to R9:** The claim that "Luce/simple rule requires raw brms" was wrong.
+`glue_choice_rule_functions()` (R/model_m3.R:399–404) natively generates
+`log({cat} * n_options)` for the simple rule, which is the Luce ratio rule for $n_k=1$.
+The real hazard is positivity: with identity links, activations can be non-positive.
+`22_welfare_bmm_simple.R` proves the pipeline works without raw brms when lower-bounded
+priors ($\text{lb}=0$) are specified.
+
+**Correction to R10:** The claim that `fixed_parameters$b=1.0` "conflicts semantically
+with M3's background noise" was wrong. `b` in `fixed_parameters` IS the formula
+parameter `b` in activation formulas. `fixed_pars_priors()` (R/helpers-prior.R:147)
+converts it to `constant(1)` automatically. There is no semantic mismatch.
+
+**Workaround for R8 (fixed payoff coefficients, genuine requirement):** Welfare-weight
+parameters can be recovered *post-hoc* from a standard M3 softmax fit via:
+$$
+\hat{w}_i = \exp(\hat\alpha_D) - 0.5, \qquad
+\hat{w}_o = \frac{\exp(\hat\alpha_D + \hat\beta_D) - 0.3 - 0.6\,\hat{w}_i}{0.9}
+$$
+This works because E_D ≈ Model D at the population level (Δlog-lik ≈ 0).
+Note however that this back-transform is unreliable near indifference — see the
+$u$ non-coverage above.
+
+---
+
+## 15.6  Go / no-go table (rounds 6–7)
+
+All measures are from executed fits.  Round 7 corrections are noted explicitly.
+
+| Claim | Evidence | Measured result | Verdict |
+|---|---|---|---|
+| Power utility jointly recoverable with range ratio ≥ 3 | `17_power_utility_3lev.csv` | $\gamma$ covered, $\rho$ covered, 10 divergences | ✅ GO |
+| 2-level design (range ratio 2): rho CI ratio 1.2× | `17_power_utility_2lev.csv` | CI ratio 1.2× (provisionally measured, 1 fit) | ⚠️ G1 → warning + range criterion (see §16.2) |
+| Prelec $\alpha$ recoverable with variable set sizes | `18_prelec_alpha06_rep{1,2}.csv` | Both covered, CI excludes 1.0 | ✅ GO |
+| Prelec null ($\alpha = 1.0$) not falsely detected | `18_prelec_alpha10_rep{1,2}.csv` | CI includes 1.0, 0 false positives | ✅ GO |
+| Composite PT coverage with `adapt_delta = 0.95` | `19_composite_pt_delta95.csv` | All 4 params covered, 0 divergences | ✅ GO |
+| $c$-$\alpha$ confound confirmed | `19_composite_pt_diagnosis.csv` | $\text{cor}(c, \alpha) = 0.906$ | ✅ CONFIRMED (non-fatal) |
+| Stage confusion: E and D indistinguishable | `20_stage_confusion.csv` | Median $|\text{ELPD diff}| = 0.15$ | ✅ CONFIRMED |
+| E_D ≈ Model D at population level | `21_welfare_reparam.csv` | $\Delta\log\text{lik} = 0.000018$ | ✅ CONFIRMED (≈ identical) |
+| $u$ (outgroup contribution) non-covered at near-indifference | `21_model_ea_recovery.csv` | est=0.458 [0.347, 0.577] vs true 0.27 | ✅ CONFIRMED — two causes diagnosed (§15.5) |
+| R9 claim (Luce rule needs raw brms) | `22_welfare_bmm_simple.R` | ❌ INCORRECT — m3 simple rule IS native | **CORRECTION** — see §16.1 |
+| R10 claim (numeraire semantic mismatch) | R/helpers-prior.R:147, model_m3.R:79 | ❌ INCORRECT — `fixed_parameters$b` works | **CORRECTION** — see §16.1 |
+| Luce rule + `fixed_parameters$b=1.0` in today's m3 | `results/22_welfare_bmm_simple.csv` | wi=1.153 [1.013,1.299] ✅; wo=0.702 [0.574,0.842] ✅; 0 divs | ✅ CONFIRMED (§16.1) |
+
+**Overall verdict:** Stage 1 implementation (`m3_utility()` → `R/model_m3_utility.R` with
+`"m3_utility"` subclass and guards G1–G4) is **ready to proceed** pending a vignette and
+test suite.  R8 (fixed payoff coefficients) remains out of Stage-1 scope.
+
+---
+
+# 16  Round 7: corrections (final)
+
+Round 7 is a corrections-only round.  No new identifiability fits.
+
+## 16.1  WP1 — Execution-backed proof that welfare-weight case runs in today's m3
+
+**Script:** `22_welfare_bmm_simple.R`
+**Results:** `results/22_welfare_bmm_simple.csv`
+**True:** $w_i = 1.2$, $w_o = 0.8$, $b = 1.0$ (numeraire).
+**Utilities:** $U(\text{keep}) = 1.00$, $U(\text{ingroup}) = 1.70$, $U(\text{universal}) = 1.74$ — well-separated, far from indifference.
+**Design:** $N = 30 \times 100$, 2 chains × 1000 iter, `choice_rule = "simple"`, identity links, `fixed_parameters$b = 1.0`, lower-bounded priors $\text{lb} = 0$.
+
+This fit proves simultaneously:
+
+- **(R9 corrected):** `m3(choice_rule = "simple")` + identity links = native Luce rule.
+  `glue_choice_rule_functions()` (R/model_m3.R:399–404) generates `log({cat} * n_options)`;
+  with $n_k = 1$ for all categories, `exp(log(U_k)) / \sum_j \exp(log(U_j)) = U_k / \sum U_j`
+  — this IS the Luce ratio rule.  No raw brms needed.
+- **(R10 corrected):** `fixed_parameters$b <- 1.0` is the supported numeraire mechanism.
+  `fixed_pars_priors()` (R/helpers-prior.R:147) converts it to `constant(1)`.
+- **(G4 adequate):** Lower-bounded priors (`lb = 0`) prevent the positivity hazard.
+
+**Results** (`results/22_welfare_bmm_simple.csv`):
+
+| Parameter | True | Estimate | 95% CI | Covered | Max R̂ | Divergences |
+|---|---|---|---|---|---|---|
+| $w_i$ | 1.20 | 1.153 | [1.013, 1.299] | ✅ | 1.003 | 0 |
+| $w_o$ | 0.80 | 0.702 | [0.574, 0.842] | ✅ | 1.003 | 0 |
+
+Both parameters covered.  0 divergences.  R̂ ≤ 1.003.
+
+**Interpretation:**
+- R9 correction confirmed: `m3(choice_rule = "simple")` + identity links runs
+  without raw brms.  The Luce rule is native to the m3 pipeline.
+- R10 correction confirmed: `fixed_parameters$b <- 1.0` is the correct numeraire
+  mechanism (`fixed_pars_priors()`, R/helpers-prior.R:147, converts to `constant(1)`).
+- Round-6 `u` non-coverage was a near-indifference + prior problem, not a structural
+  limitation.  With well-separated utilities ($w_i = 1.2$, $w_o = 0.8$) and correct
+  lower-bounded priors (`lb = 0`), recovery is clean.
+
+---
+
+## 16.2  Corrected requirement set
+
+After round 7 corrections, the requirement set is R1–R8 (10 entries, R9/R10 downgraded):
+
+| # | Requirement | Severity | Stage-1 scope |
+|---|---|---|---|
+| R1 | Per-category activation formula trap | silent-wrong | ✅ resolved |
+| R2 | Default priors for $\gamma$, $\rho$, $\alpha$ | friction | ✅ resolved |
+| R3 | Identity links undocumented | runtime error | ✅ resolved |
+| R4 | Design-dependent identifiability guards (G1–G3) | silent-wrong | ✅ resolved (G1 → warning) |
+| R5 | Per-option attribute data (binary PT) | runtime error | Stage-2 |
+| R6 | Utility × weighting composition | friction | ✅ resolved |
+| R7 | Parameter labelling in `summary()` | friction | ~ partial |
+| R8 | Fixed payoff coefficients in NLF (welfare-weight use case) | silent-wrong | Stage-2+ |
+| R9 | Positivity hazard (G4): identity link + simple rule | runtime error | ✅ guard G4 (warning) |
+| R10 | Numeraire fixing: documentation gap only | friction | ✅ auto-set by constructor |
+
+Guards G1–G4 are in `16_identifiability_guards.R`.  G1 is a warning (range criterion
+$\max(V)/\min(V) \geq 3$, provisionally measured).  G4 is a warning on construction.
+
+---
+
+## 16.3  README render note
+
+`README.qmd` was rendered locally on 2026-06-11 with:
+
+```sh
+quarto render local/exploration/m3-utility/README.qmd --to html
+```
+
+Exit status: 0.  Output: `README.html`.  Quarto is not installed in this CI environment
+(exit status checked locally); the `.qmd` source is in the repo for local rendering.
+
+---
+
+# Appendix: file index
+
+| File | Contents |
+|---|---|
+| `01_formal_mapping.R` | Numerical verification of the M3 ↔ utility-theory mapping |
+| `02_prototype_a_eu.R` | EU-activation prototype + brms model spec + identifiability |
+| `03_prototype_b_prelec.R` | Prelec weighting prototype + brms model spec + null model |
+| `04_axiom_simulations.R` | IIA, regularity, transitivity, set-size, similarity checks |
+| `05_parameter_recovery.R` | Round 1: pooled fixed-effects recovery for Prototypes A and B |
+| `06_realistic_recovery.R` | Round 2: hierarchical recovery grid with false-positive diagnostics |
+| `07_power_utility.R` | Power utility $u(V)=V^\rho$: identifiability, design requirements |
+| `08_stage_confusion.R` | Encoding vs decision stage: LOO confusion matrix + separation designs |
+| `09_composite_pt.R` | Composite PT M3: joint identifiability of $(\gamma, \alpha)$ |
+| `10_bmm_api_example.R` | bmm API spike: EU extension via `m3()` + `bmf()`, vignette template |
+| `11_utility_wrapper.R` | `m3_utility()` prototype: clean API, formula generator, default priors (fix: normal not lognormal for log-link params) |
+| `12_binary_choice_pt.R` | Hierarchical binary PT (Nilsson et al. 2011): rho, alpha, lambda recovery |
+| `13_recovery_one_cell.R` | Single-cell helper for incremental WP1 grid runs |
+| `14_requirements_inventory.md` | 10 requirements (R9/R10 corrected round 7); severity, stage, workaround |
+| `15_user_surface.R` | 9 code snippets (3 UCs × 3 archs) + smoke fits |
+| `16_identifiability_guards.R` | Guards G1–G4; G1 revised to warning + range criterion; G4 new (round 7) |
+| `17_power_utility_recovery.R` | WP1: power utility 3-level vs 2-level CI-width comparison |
+| `18_prelec_hierarchical.R` | WP2: Prelec recovery, $\alpha \in \{0.6, 1.0\}$, 2 reps each |
+| `19_composite_pt_proper.R` | WP3: composite PT `adapt_delta = 0.95`, $c$-$\alpha$ confound diagnosis |
+| `20_stage_confusion_loo.R` | WP4: stage confusion 2×2 LOO cross-tab |
+| `21_welfare_weight.R` | WP5: E_D/E_A welfare-weight simulation; R9/R10 corrected in round 7 |
+| `22_welfare_bmm_simple.R` | Round 7 WP1: bmm simple-rule welfare-weight fit; proves R9/R10 corrections |
+| `DESIGN_utility_api.md` | Design memo: R9/R10 corrected round 7; G4 added; staged recommendation |
+| `results/` | CSV files for measured parameter recovery results |
+| `README.qmd` | This document (renders to HTML or PDF via Quarto; verified locally 2026-06-11) |

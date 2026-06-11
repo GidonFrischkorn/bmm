@@ -1,0 +1,4 @@
+"fit","param","true_value","estimate","ci_lower","ci_upper","covered","ci_width","excl_one","max_rhat","divergences"
+"prelec_alpha06_rep1","a",1.5,1.5265113097,1.33041028,1.730314985,TRUE,0.399904705,TRUE,1.01093707098745,0
+"prelec_alpha06_rep1","c",2,2.0486443908,1.77834008,2.3110783,TRUE,0.53273822,TRUE,1.01093707098745,0
+"prelec_alpha06_rep1","alpha",0.6,0.59805483679,0.4106688155,0.76506853125,TRUE,0.35439971575,TRUE,1.01093707098745,0

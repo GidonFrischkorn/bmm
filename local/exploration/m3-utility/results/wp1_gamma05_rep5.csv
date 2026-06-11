@@ -1,0 +1,2 @@
+"gamma_true","rep","estimate","q2.5","q97.5","covered","excl_zero","max_rhat"
+0.5,5,0.4692,0.3567,0.5832,TRUE,TRUE,1.011
