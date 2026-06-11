@@ -92,10 +92,12 @@ cat(sprintf("Aggregate: correct=%.3f, other=%.3f, npl=%.3f\n",
 cat("\n--- Fitting MPT prototype ---\n")
 
 tree_mpt <- mpt_tree("main", list(
-  correct = "Pm*Pb + Pm*(1 - Pb)*(1/4) + (1 - Pm)*(1/8)",
-  other   = "Pm*(1 - Pb)*(3/4) + (1 - Pm)*(3/8)",
-  npl     = "(1 - Pm)*(4/8)"
+  correct = "Pm*Pb + Pm*(1 - Pb)*0.25 + (1 - Pm)*0.125",
+  other   = "Pm*(1 - Pb)*0.75 + (1 - Pm)*0.375",
+  npl     = "(1 - Pm)*0.5"
 ))
+# Note: 1/4, 3/8 etc. are R-syntax but Stan interprets them as integer division
+# (= 0). Using decimal literals avoids the silent zero.
 spec_mpt <- mpt(trees = list(tree_mpt))  # condition = NULL, single tree
 print(spec_mpt)
 
@@ -151,13 +153,13 @@ Pm_draws <- plogis(draws_mpt$b_lPm_Intercept)
 Pb_draws <- plogis(draws_mpt$b_lPb_Intercept)
 n_draws  <- length(Pm_draws)
 
-# MPT formula
+# MPT formula (using same decimal literals as the tree expression)
 p_corr_mpt  <- Pm_draws * Pb_draws +
-               Pm_draws * (1 - Pb_draws) * (1/4) +
-               (1 - Pm_draws) * (1/8)
-p_other_mpt <- Pm_draws * (1 - Pb_draws) * (3/4) +
-               (1 - Pm_draws) * (3/8)
-p_npl_mpt   <- (1 - Pm_draws) * (4/8)
+               Pm_draws * (1 - Pb_draws) * 0.25 +
+               (1 - Pm_draws) * 0.125
+p_other_mpt <- Pm_draws * (1 - Pb_draws) * 0.75 +
+               (1 - Pm_draws) * 0.375
+p_npl_mpt   <- (1 - Pm_draws) * 0.5
 
 # M3 formula using the inverse-bijection: a = f(Pm, Pb), c = g(Pm, Pb)
 a_from_draws <- 2 * b * Pm_draws * (1 - Pb_draws) / (1 - Pm_draws)
