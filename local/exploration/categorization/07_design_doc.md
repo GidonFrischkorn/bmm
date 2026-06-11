@@ -65,13 +65,32 @@ identifiability concern. Coverage for c is adequate (0.88).
 
 ### 4. Hierarchical proof-of-concept (05_hierarchical.R)
 
-15-subject simulation with random effects on log(c), log(gamma), and
-softmax-w1 (non-centred parameterisation, adapt_delta=0.90):
+6-subject simulation (N=6, n=15/stim, T=1080) with random effects on
+log(c), log(gamma), and softmax-w1. Non-centred parameterisation,
+stimulus-indexed D_stim (S=12 matrices rather than T matrices), adapt_delta=0.90.
+Sampling time: 924.7 s (4 chains sequential):
 
-- Group mean recovery: all true values within 90% CI (see script output)
-- Subject-level r(c) and r(w1): reported in script output
+| Param | True | Posterior | 90% CI | In CI |
+|---|---|---|---|---|
+| mean_c | 0.800 | 1.366 | [0.884, 2.028] | NO |
+| mean_gamma | 1.500 | 1.177 | [0.735, 1.734] | YES |
+| mean_w1 | 0.650 | 0.660 | [0.467, 0.809] | YES |
+| sigma_log_c | 0.400 | 0.284 | [0.025, 0.607] | YES |
+| sigma_log_gamma | 0.400 | 0.291 | [0.028, 0.665] | YES |
+| sigma_w1_logit | 0.500 | 1.132 | [0.487, 1.976] | YES |
+
+Diagnostics: Rhat_max=1.008, ESS_bulk_min=398, Divergences=0.
+Subject-level recovery: r(c_subj)=0.827, r(w1_subj)=0.906.
+
+**Note on mean_c**: true=0.800 falls outside the 90% CI, consistent with the
+known c-gamma trade-off and the prior Normal(0.5, 0.5) on log(c) pulling
+the posterior toward exp(0.5)≈1.65. Subject-level c is nonetheless well
+recovered (r=0.827). Group mean recovery improves with larger N or more
+informative priors.
+
 - Non-centred parameterisation is stable with adapt_delta=0.90
-- Divergences: 0 (expected with informative hyperpriors)
+- Divergences: 0 confirmed
+- Stimulus-indexed D_stim (12 matrices vs T=1080) avoids data-overhead bottleneck
 
 ### 5. Real-data fit (06_realdata_fit.R)
 

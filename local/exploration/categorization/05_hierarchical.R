@@ -55,8 +55,8 @@ D_raw_list <- lapply(seq_len(T_stims), function(s) D_raw_stim[s, , ])
 # 2. Simulate multi-subject data
 # -----------------------------------------------------------------------
 
-N_subj      <- 15L
-n_per_stim  <- 30L  # trials per stimulus per subject
+N_subj      <- 6L
+n_per_stim  <- 15L  # trials per stimulus per subject (proof-of-concept scale)
 
 # Group-level true parameters
 mu_log_c     <- log(0.8)
