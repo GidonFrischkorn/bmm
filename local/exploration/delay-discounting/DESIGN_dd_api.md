@@ -26,12 +26,21 @@ constructor question directly.
 
 Four discount functions implemented and verified by MLE recovery (N=200 trials/subject):
 
-| Function      | Formula                          | k_true | |bias_logk| | Conv |
-|---------------|----------------------------------|--------|------------|------|
-| hyperbolic    | A / (1 + k·D)                    | 0.020  | 0.034      | ✓    |
-| exponential   | A · exp(−k·D)                    | 0.010  | 0.035      | ✓    |
-| hyperboloid   | A / (1 + k·D)^s                  | 0.020  | 0.457      | ✓    |
-| quasi-hyp     | β·A·exp(−k·D)  [D>0]            | 0.040  | 0.308      | ✓    |
+| Function      | Formula                          | k_true | |bias_logk| | aux param           | |bias_aux| | p(LL) | Conv |
+|---------------|----------------------------------|--------|------------|---------------------|-----------|-------|------|
+| hyperbolic    | A / (1 + k·D)                    | 0.020  | 0.034      | —                   | —         | 0.44  | ✓    |
+| exponential   | A · exp(−k·D)                    | 0.010  | 0.035      | —                   | —         | 0.56  | ✓    |
+| hyperboloid   | A / (1 + k·D)^s                  | 0.020  | 0.457      | s=0.8 (bias_logs)   | 0.329     | 0.52  | ✓    |
+| quasi-hyp     | β·A·exp(−k·D)  [D>0]            | 0.005  | 0.040      | β=0.7 (bias_logit)  | 0.141     | 0.44  | ✓    |
+
+k_true for qh changed from 0.04 → 0.005: k=0.04 produced p(LL)≈0.11
+(near-degenerate), making the +0.308 bias unreliable (~20 LL choices).
+k=0.005 gives p(LL)≈0.44 and |bias_logk|=0.040.
+
+**Identifiability note (hyperboloid):** k and s trade off — k is biased
+low (0.013 vs 0.020) and s high (1.11 vs 0.80). These are jointly
+recoverable but wider than for two-parameter models; a tight prior on s
+(or fixing s=1 for hyperbolic) is recommended in production.
 
 All |bias_logk| < 0.5. Multi-subject recovery (N=30 × 80 trials, hyperbolic):
 **r = 0.988**, RMSE on log(k) = 0.096.
@@ -81,7 +90,15 @@ underscores** — use `logk` not `log_k`.
 
 **G2 — k vs. phi (sensitivity) confound:**
 - Both parameters shift the slope of P(LL) vs. value difference
-- Hessian-based correlation check: |r|=0.046 for adequate designs
+- Hessian-based correlation check: threshold 0.70 (recalibrated from 0.85)
+  - Original demo used a flat-amount design (amt_LL ≈ amt_SS), which yields
+    |r|=0.56 — _below_ threshold; guard did not fire on the intended deficient
+    design. This was an honest-reporting gap noted in review.
+  - Correct deficient design: **short delays (1–7 days)**, where the discount
+    function is near-linear and k and phi cannot be separated (both scale the
+    tiny delay effect). Across 10 seeds: mean |r|=0.83, fires in 10/10 cases
+    at threshold=0.70.
+  - Adequate wide-delay design: mean |r|=0.15, fires 0/10 cases.
 - Solution A: strong prior on `logphi ~ Normal(0.7, 0.3)` (phi ≈ 2)
 - Solution B: Luce rule (`P(LL) = V_LL/(V_LL+V_SS)`) eliminates phi entirely
 - Since amounts are positive (V > 0 guaranteed for k, D > 0), **Luce is
@@ -102,7 +119,7 @@ Both discounting and prospect theory use **per-option attributes**:
 
 ```
 Discounting:     amt_A, delay_A, amt_B, delay_B      (2 attributes × 2 options)
-Prospect theory: amt_A, prob_A, amt_B, prob_B        (2 attributes × 2 options)
+Prospect theory: amt_A, prob_A,  amt_B, prob_B       (2 attributes × 2 options)
 ```
 
 The data layout is identical. The **valuation function** differs:
@@ -112,10 +129,19 @@ The data layout is identical. The **valuation function** differs:
 | Discounting     | A / (1 + k·D)        | k (discount rate)|
 | Prospect theory | w(p)·v(x)            | α, γ (Prelec+PT) |
 
-**Verdict: the data interface can be shared.** Both domains supply
-`(amt, attr2)` per option and a binary choice. The constructor would
-dispatch to the appropriate valuation function via a `valuation_fn`
-argument.
+**Verdict: the data interface _can_ be shared — but this verdict is
+pending resolution of #24 (prospect theory exploration).**
+
+#24 is still open and its data format is not yet locked. Its current
+exploration uses column names `x_A/p_A` (not `amt_A/prob_A`), which
+conflicts with the naming used here. Before either constructor is built,
+#26 and #24 need one agreed attribute-column naming contract and a
+base-class API signed off by both explorations. Recommend pinning a
+single canonical interface spec (a short addendum issue or a shared
+section in both DESIGN memos) before implementation begins.
+
+Until that contract exists, the "shared base class" claim in §3.3
+should be read as a _design direction_, not a locked decision.
 
 ### 3.2 Choice rule asymmetry
 
@@ -237,8 +263,8 @@ From the issue:
 
 | Criterion | Status | Notes |
 |-----------|--------|-------|
-| Validated R reference likelihood, recovering known parameters across all four discount functions | ✓ | 01_reference_implementation.R: all |bias_logk| < 0.5 |
+| Validated R reference likelihood, recovering known parameters across all four discount functions | ✓ | 01_reference_implementation.R: all |bias_logk| < 0.5; s/beta now reported; qh p(LL) fixed to 0.44 |
 | brms/Stan prototype fitting a small hierarchical dataset, with diagnostics reported | ✓ | 02_brms_prototype.R: R-hat=1.018, r=0.995 |
-| Identifiability guards demonstrated (delay-range guard; k-vs-sensitivity confound) | ✓ | 03_identifiability_guards.R: G1, G2, G3 |
-| Feasibility/design doc with explicit verdict on shared constructor | ✓ | This document: Option A recommended |
+| Identifiability guards demonstrated (delay-range guard; k-vs-sensitivity confound) | ✓ | 03_identifiability_guards.R: G1 ✓, G2 fixed (short-delay regime, threshold 0.70), G3 ✓ |
+| Feasibility/design doc with explicit verdict on shared constructor | ~ | This document: Option A direction, pending #24 API lock + column-naming contract |
 | All code under local/exploration/delay-discounting/; no R/ or inst/ changes | ✓ | Verified |

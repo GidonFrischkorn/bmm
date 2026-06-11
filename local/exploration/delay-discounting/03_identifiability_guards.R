@@ -185,12 +185,18 @@ check_kphi_confound <- function(dat, n_starts = 9) {
                                     message = "Hessian singular — confound likely."))
 
   cor_kphi <- cov_mat[1, 2] / sqrt(cov_mat[1, 1] * cov_mat[2, 2])
-  threshold <- 0.85
+  # Threshold lowered to 0.70 after probing: short-delay (linear) regime
+  # reliably hits |r| = 0.73–0.999 (mean 0.83 across 10 seeds), while
+  # adequate wide-delay designs stay below 0.48.  The original 0.85 threshold
+  # failed to fire on any realistic deficient design.
+  threshold <- 0.70
 
   if (abs(cor_kphi) > threshold) {
     return(list(ok = FALSE, cor_kphi = round(cor_kphi, 3), message = paste0(
       "k-phi confound detected: |cor(log_k, log_phi)| = ", round(abs(cor_kphi), 3),
       " > ", threshold, ".\n",
+      "  Likely cause: delays too short (linear discount regime) — k and phi\n",
+      "  both scale the tiny delay effect and cannot be separated.\n",
       "  Recommendation: fix phi (softmax temperature) a priori,\n",
       "  or use a strong prior on phi, or use the Luce rule (phi not estimated)."
     )))
@@ -215,22 +221,21 @@ for (lp in lp_grid) {
 cat("\n")
 
 # MLE joint recovery
-cat("--- G2 Demo: deficient phi identification (flat amount differences) ---\n")
-# Design where all amt_LL are nearly equal to amt_SS — V_LL ≈ V_SS regardless
-# of k, making phi nearly unidentifiable
-design_flat <- data.frame(
-  amt_SS = 10, delay_SS = 0,
-  amt_LL = rep(c(10.5, 11, 11.5, 12, 12.5), each = 40),
-  delay_LL = rep(c(7, 14, 30, 90, 180), 40)
-)
-set.seed(200)
-design_flat$choice <- rbinom(nrow(design_flat), 1,
-                             p_choose_ll(sv_hyperbolic(design_flat$amt_LL, design_flat$delay_LL, 0.02),
-                                         sv_hyperbolic(design_flat$amt_SS, design_flat$delay_SS, 0.02), 2))
-
-g2_flat <- check_kphi_confound(design_flat)
-cat("Flat-amount design:  ok =", g2_flat$ok, " cor_kphi =", g2_flat$cor_kphi, "\n")
-cat("Message:", g2_flat$message, "\n\n")
+cat("--- G2 Demo: deficient design — short delays (1-7 days, linear regime) ---\n")
+# The k-phi confound lives in the *linear/short-delay* regime: when all delays
+# are short, 1/(1+k*D) ≈ 1 - k*D, so k enters linearly and is nearly
+# exchangeable with phi (both scale the tiny delay effect).  The result is
+# near-degenerate p(LL) ≈ 0.98 and |cor(logk, logphi)| > 0.70.
+# Note: a flat-amount design (amt_LL ≈ amt_SS) produces |r| ≈ 0.56 — below
+# threshold — because phi is poorly identified but k and phi do not genuinely
+# trade off there.
+dat_short_delay <- sim_choices(make_design(200, c(1, 2, 3, 5, 7), seed = 1),
+                               k_true = 0.02, phi_true = 2, seed = 200)
+cat("p(LL) =", round(mean(dat_short_delay$choice), 3),
+    " (near-degenerate: delay too short to drive discounting)\n")
+g2_deficient <- check_kphi_confound(dat_short_delay)
+cat("Short-delay design:  ok =", g2_deficient$ok, " cor_kphi =", g2_deficient$cor_kphi, "\n")
+cat("Message:", g2_deficient$message, "\n\n")
 
 cat("--- G2 Demo: adequate design ---\n")
 g2_ok <- check_kphi_confound(dat_adq)
@@ -322,7 +327,12 @@ cat("  Implementation: check_delay_range(delay_LL, k_ref = population_median_k)\
 
 cat("G2 (k vs. phi confound):\n")
 cat("  Detectable via |cor(logk, logphi)| at the MLE (observed Fisher info).\n")
-cat("  Main driver: flat V_LL - V_SS differences → ambiguous scale vs. rate.\n")
+cat("  Threshold: 0.70 (chosen so short-delay regime fires reliably;\n")
+cat("  flat-amount design gives |r| ≈ 0.56 and does NOT trigger — wrong\n")
+cat("  deficient design used in first draft; now fixed to short-delay).\n")
+cat("  Main driver: linear discount regime (short delays) — k and phi both\n")
+cat("  scale the tiny delay effect and cannot be separated, producing\n")
+cat("  near-degenerate p(LL) ≈ 0.98.\n")
 cat("  Solution: strong prior on logphi (Normal(0.7, 0.3)), or use Luce rule.\n\n")
 
 cat("G3 (Functional-form discriminability):\n")
