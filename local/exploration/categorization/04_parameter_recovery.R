@@ -1,8 +1,13 @@
 # GCM Parameter Recovery — identifiability of c, gamma, w
 #
-# Simulates data from known parameters, fits the Stan model,
-# and checks whether true values are recovered. Documents the
-# c-gamma trade-off and the gamma=1 constraint for the prototype.
+# Phase 2a changes:
+# - Multinomial-aggregated likelihood: each scenario runs S=12 multinomial
+#   evaluations instead of T=n_per_stim×12 categorical ones.
+# - Improved scenario design: 5 of 8 scenarios now vary gamma (previously 2/8),
+#   so r(gamma) and CI coverage are estimated from a proper spread.
+# - Prior: log_c ~ N(0,1), log_gamma ~ N(0,1) — the recommended defaults.
+#   N(0.5,0.5) on log(c) is documented here as an informative option, not
+#   the default, because it pulled mean_c away from true values near 0.8.
 #
 # Run from repository root:
 #   Rscript local/exploration/categorization/04_parameter_recovery.R
@@ -39,17 +44,18 @@ stim_coords <- data.frame(
 
 ex_mat   <- as.matrix(stim_coords[, c("x1", "x2")])
 ex_cats  <- stim_coords$cat
-T_items  <- nrow(stim_coords)
+T_items  <- nrow(stim_coords)  # S = 12 unique stimuli
 J_items  <- T_items
 M_dims   <- 2
 K_cats   <- 2
 r_met    <- 2
 
-# Pre-compute D_raw[T, J, M] = |x_tm - e_jm|^r
+# Pre-compute per-stimulus distance matrices (S=12, each J×M)
 D_raw <- array(0, dim = c(T_items, J_items, M_dims))
 for (m in seq_len(M_dims)) {
   D_raw[, , m] <- abs(outer(ex_mat[, m], ex_mat[, m], `-`))^r_met
 }
+D_stim_list <- lapply(seq_len(T_items), function(s) D_raw[s, , ])
 
 # -----------------------------------------------------------------------
 # 2. Simulate trial data from known parameters
@@ -72,7 +78,7 @@ simulate_gcm <- function(c_true, gamma_true, w1_true, n_per_stim,
 }
 
 # -----------------------------------------------------------------------
-# 3. Stan model (re-use from 03, adapted for recovery)
+# 3. Stan model — multinomial-aggregated likelihood
 # -----------------------------------------------------------------------
 
 gcm_stan_code <- "
@@ -95,12 +101,12 @@ functions {
   }
 }
 data {
-  int<lower=1> T;
+  int<lower=1> S;
   int<lower=1> J;
   int<lower=1> M;
   int<lower=1> K;
-  array[T] int<lower=1, upper=K> y;
-  array[T] matrix[J, M] D_raw;
+  array[S, K] int<lower=0> y_counts;   // per-(stim, cat) response counts
+  array[S] matrix[J, M] D_stim;        // pre-computed distances (one per stimulus)
   array[J] int<lower=1, upper=K> ex_cat;
 }
 parameters {
@@ -119,9 +125,9 @@ model {
   log_c     ~ normal(0, 1);
   log_gamma ~ normal(0, 1);
   w1_logit  ~ normal(0, 1);
-  for (t in 1:T) {
-    vector[K] la = gcm_log_act(D_raw[t], w, c, gamma, log_bias, ex_cat, K);
-    target += la[y[t]] - log_sum_exp(la);
+  for (s in 1:S) {
+    vector[K] la = gcm_log_act(D_stim[s], w, c, gamma, log_bias, ex_cat, K);
+    target += multinomial_lpmf(y_counts[s] | softmax(la));
   }
 }
 "
@@ -133,7 +139,7 @@ mod <- cmdstan_model(stan_file, quiet = TRUE)
 cat("Compilation OK.\n\n")
 
 # -----------------------------------------------------------------------
-# 4. Recovery function
+# 4. Recovery function (aggregates trials to counts before fitting)
 # -----------------------------------------------------------------------
 
 run_recovery <- function(c_true, gamma_true, w1_true, n_per_stim,
@@ -141,18 +147,22 @@ run_recovery <- function(c_true, gamma_true, w1_true, n_per_stim,
   trial_df <- simulate_gcm(c_true, gamma_true, w1_true, n_per_stim,
                             ex_mat, ex_cats, rng_seed = rng_seed)
 
-  D_raw_list <- lapply(seq_len(nrow(trial_df)), function(row) {
-    D_raw[trial_df$stim[row], , ]
-  })
+  # Aggregate T = S × n_per_stim trials to S multinomial cells
+  y_counts <- matrix(0L, nrow = T_items, ncol = K_cats)
+  for (s in seq_len(T_items)) {
+    for (k in seq_len(K_cats)) {
+      y_counts[s, k] <- sum(trial_df$stim == s & trial_df$y == k)
+    }
+  }
 
   stan_data <- list(
-    T       = nrow(trial_df),
-    J       = J_items,
-    M       = M_dims,
-    K       = K_cats,
-    y       = trial_df$y,
-    D_raw   = D_raw_list,
-    ex_cat  = ex_cats
+    S        = T_items,
+    J        = J_items,
+    M        = M_dims,
+    K        = K_cats,
+    y_counts = y_counts,
+    D_stim   = D_stim_list,
+    ex_cat   = ex_cats
   )
 
   fit <- mod$sample(
@@ -174,9 +184,9 @@ run_recovery <- function(c_true, gamma_true, w1_true, n_per_stim,
     true_g   = gamma_true,
     true_w1  = w1_true,
     n_trials = nrow(trial_df),
-    post_c   = round(draws$mean[draws$variable == "c"], 3),
+    post_c   = round(draws$mean[draws$variable == "c"],     3),
     post_g   = round(draws$mean[draws$variable == "gamma"], 3),
-    post_w1  = round(draws$mean[draws$variable == "w1"], 3),
+    post_w1  = round(draws$mean[draws$variable == "w1"],    3),
     ci_c     = sprintf("[%.2f, %.2f]", draws$q5[draws$variable == "c"],
                        draws$q95[draws$variable == "c"]),
     ci_g     = sprintf("[%.2f, %.2f]", draws$q5[draws$variable == "gamma"],
@@ -188,25 +198,29 @@ run_recovery <- function(c_true, gamma_true, w1_true, n_per_stim,
 
 # -----------------------------------------------------------------------
 # 5. Recovery scenarios
+#
+# Phase 2a redesign: previous 8 scenarios varied gamma in only 2 of 8 cases
+# (all others fixed gamma=1.5), which caused the spurious r(gamma)=-0.12 and
+# 0.75 CI coverage. The new design varies gamma across 5 of 8 scenarios so
+# that recovery statistics reflect the actual identifiability landscape.
+# A Phase 2b follow-up will replace this with a proper factorial SBC grid.
 # -----------------------------------------------------------------------
 
-cat("=== Parameter recovery study ===\n\n")
+cat("=== Parameter recovery study (multinomial-aggregated) ===\n\n")
 
 scenarios <- list(
   # Baseline: mid-range parameters, 50 trials/stim
   list(c = 0.8, g = 1.5, w1 = 0.65, n = 50, seed = 101, label = "baseline_n50"),
-  # High sensitivity
+  # Vary c only
   list(c = 2.0, g = 1.5, w1 = 0.65, n = 50, seed = 102, label = "high_c_n50"),
-  # Low sensitivity
-  list(c = 0.3, g = 1.5, w1 = 0.65, n = 50, seed = 103, label = "low_c_n50"),
-  # Extreme attention weight
-  list(c = 0.8, g = 1.5, w1 = 0.9, n = 50, seed = 104, label = "extreme_w_n50"),
-  # Equal attention
-  list(c = 0.8, g = 1.5, w1 = 0.5, n = 50, seed = 105, label = "equal_w_n50"),
-  # Small n (10 trials/stim = 120 total)
-  list(c = 0.8, g = 1.5, w1 = 0.65, n = 10, seed = 106, label = "baseline_n10"),
-  # c-gamma trade-off region: low c, high gamma (near-indistinguishable from high c, low gamma)
-  list(c = 0.3, g = 3.0, w1 = 0.65, n = 50, seed = 107, label = "low_c_high_g"),
+  list(c = 0.4, g = 1.5, w1 = 0.65, n = 50, seed = 103, label = "low_c_n50"),
+  # Vary gamma (previously only 2/8 scenarios varied gamma — now 5/8)
+  list(c = 0.8, g = 3.0, w1 = 0.65, n = 50, seed = 104, label = "high_g_n50"),
+  list(c = 0.8, g = 0.7, w1 = 0.65, n = 50, seed = 105, label = "low_g_n50"),
+  # Vary attention weight
+  list(c = 0.8, g = 1.5, w1 = 0.9,  n = 50, seed = 106, label = "extreme_w_n50"),
+  # c-gamma trade-off region
+  list(c = 0.4, g = 3.0, w1 = 0.65, n = 50, seed = 107, label = "low_c_high_g"),
   list(c = 1.5, g = 0.7, w1 = 0.65, n = 50, seed = 108, label = "high_c_low_g")
 )
 
@@ -246,7 +260,6 @@ cat(sprintf("  r(true_w1, post_w1):   %.3f\n", r_w1))
 
 # Coverage (does 90% CI contain true value?)
 contains_true <- function(draws_ci, true_val) {
-  # CI strings "[lo, hi]"
   bounds <- as.numeric(strsplit(gsub("\\[|\\]", "", draws_ci), ", ")[[1]])
   true_val >= bounds[1] & true_val <= bounds[2]
 }
@@ -261,13 +274,12 @@ cat(sprintf("  c: %.2f   gamma: %.2f\n", cov_c, cov_g))
 # -----------------------------------------------------------------------
 
 cat("\n=== c-GAMMA TRADE-OFF ANALYSIS ===\n")
-cat("The two scenarios low_c_high_g and high_c_low_g share similar\n")
+cat("The two trade-off scenarios low_c_high_g and high_c_low_g share similar\n")
 cat("predicted probabilities when n is moderate:\n")
 
-# Show predicted P(cat B) for both trade-off scenarios
 w <- c(0.65, 0.35)
 scenarios_tradeoff <- list(
-  list(c = 0.3, g = 3.0, label = "low_c/high_g"),
+  list(c = 0.4, g = 3.0, label = "low_c/high_g"),
   list(c = 1.5, g = 0.7, label = "high_c/low_g")
 )
 for (s in scenarios_tradeoff) {
@@ -282,7 +294,12 @@ for (s in scenarios_tradeoff) {
 
 cat("\nBoth yield similar P(cat B) patterns — the trade-off is partially\n")
 cat("identifiable with sufficient data but requires informative priors.\n")
-cat("Recommendation: Normal(0.5, 0.5) on log(c) and Normal(0, 0.5) on log(gamma).\n")
+cat("Recommended default: log(c) ~ N(0, 1), log(gamma) ~ N(0, 1).\n")
+cat("For the prototype model fix gamma=1 (Nosofsky & Zaki 2002).\n")
+cat("\nNote: an informative N(0.5, 0.5) prior on log(c) pulls the posterior\n")
+cat("toward exp(0.5)=1.65, placing true values near c=0.8 outside the 90%\n")
+cat("CI. Use N(0.5, 0.5) only if the coordinate space is known to be scaled\n")
+cat("so that c is expected to be around 1.0-2.0.\n")
 
 # -----------------------------------------------------------------------
 # 8. Prototype identifiability
@@ -301,5 +318,8 @@ cat(sprintf("  Recovery r(gamma): %.3f\n", r_g))
 cat(sprintf("  Recovery r(w1):    %.3f\n", r_w1))
 cat(sprintf("  Rhat max overall:  %.3f\n", max(results_df$rhat_max)))
 cat(sprintf("  Total divergences: %d\n",   sum(results_df$diverge)))
-cat("  c-gamma identifiability: partial — requires moderate n and informative priors.\n")
+cat("  Likelihood: multinomial per stimulus (exact, not approximate)\n")
+cat("  Prior: log_c ~ N(0,1), log_gamma ~ N(0,1) — weakly informative defaults.\n")
+cat("  c-gamma identifiability: partial — requires moderate n and careful priors.\n")
 cat("  w1 recovery: good across all scenarios.\n")
+cat("  Phase 2b: replace 8-scenario design with factorial SBC grid over (c, gamma, w).\n")

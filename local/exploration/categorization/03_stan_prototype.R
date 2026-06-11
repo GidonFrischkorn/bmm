@@ -1,6 +1,8 @@
 # GCM Stan Prototype — gradient/stability checks and cost benchmarks
 #
 # Implements the GCM likelihood via a direct CmdStanR model (not via brms).
+# Uses multinomial-aggregated likelihood: collapses T=300 trial-level
+# categorical evaluations to S=12 per-stimulus multinomial evaluations.
 # Validates predictions against the R reference, checks Rhat and ESS,
 # and benchmarks per-evaluation cost.
 #
@@ -42,7 +44,7 @@ obs_cond1 <- catlearn::nosof88 |>
   filter(cond == 1) |>
   arrange(stim)
 
-T_items <- nrow(stim_coords)
+T_items <- nrow(stim_coords)   # S = 12 unique stimuli
 J_items <- T_items
 M_dims  <- 2
 K_cats  <- 2
@@ -52,13 +54,13 @@ test_mat  <- as.matrix(stim_coords[, c("x1", "x2")])
 ex_mat    <- test_mat
 ex_cats   <- stim_coords$cat
 
-# Pre-compute D_raw[T, J, M] = |x_tm - e_jm|^r
+# Pre-compute D_stim[S, J, M] = |x_sm - e_jm|^r (one matrix per unique stimulus)
 D_raw <- array(0, dim = c(T_items, J_items, M_dims))
 for (m in seq_len(M_dims)) {
   D_raw[, , m] <- abs(outer(test_mat[, m], ex_mat[, m], `-`))^r_met
 }
+D_stim_list <- lapply(seq_len(T_items), function(s) D_raw[s, , ])
 
-# Category membership: ex_cat[J] = integer category label
 ex_cat_int <- ex_cats
 
 # -----------------------------------------------------------------------
@@ -74,30 +76,31 @@ trial_rows <- lapply(seq_len(T_items), function(i) {
 })
 trial_df <- do.call(rbind, trial_rows)
 
+# Aggregate to per-(stimulus, category) counts — S=12 multinomial cells
+y_counts <- matrix(0L, nrow = T_items, ncol = K_cats)
+for (s in seq_len(T_items)) {
+  for (k in seq_len(K_cats)) {
+    y_counts[s, k] <- sum(trial_df$stim == s & trial_df$y == k)
+  }
+}
+cat(sprintf("Aggregated %d trials to [S=%d, K=%d] count matrix\n\n",
+            nrow(trial_df), T_items, K_cats))
+
 # -----------------------------------------------------------------------
-# 3. Stan model — clean implementation
+# 3. Stan model — multinomial-aggregated likelihood
 # -----------------------------------------------------------------------
 
 gcm_stan_code <- "
 functions {
-  // Returns [J] similarity vector for one test item
-  vector gcm_sims(matrix D_t, vector w, real c) {
+  vector gcm_log_act(matrix D_t, vector w, real c, real gamma,
+                     vector log_bias, array[] int ex_cat, int K) {
     int J = rows(D_t);
-    int M = cols(D_t);
     vector[J] sims;
+    vector[K] log_act;
     for (j in 1:J) {
       real d = sqrt(dot_product(w, D_t[j, ]'));
       sims[j] = exp(-c * d);
     }
-    return sims;
-  }
-
-  // Returns log unnormalised activations [K] for one test item
-  vector gcm_log_act(matrix D_t, vector w, real c, real gamma,
-                     vector log_bias, array[] int ex_cat, int K) {
-    int J = rows(D_t);
-    vector[J] sims = gcm_sims(D_t, w, c);
-    vector[K] log_act;
     for (k in 1:K) {
       real act_k = 0;
       for (j in 1:J) if (ex_cat[j] == k) act_k += sims[j];
@@ -107,12 +110,12 @@ functions {
   }
 }
 data {
-  int<lower=1> T;
+  int<lower=1> S;
   int<lower=1> J;
   int<lower=1> M;
   int<lower=1> K;
-  array[T] int<lower=1, upper=K> y;
-  array[T] matrix[J, M] D_raw;
+  array[S, K] int<lower=0> y_counts;   // per-(stim, cat) response counts
+  array[S] matrix[J, M] D_stim;        // pre-computed distances (one per stimulus)
   array[J] int<lower=1, upper=K> ex_cat;
 }
 parameters {
@@ -131,18 +134,17 @@ model {
   log_c     ~ normal(0, 1);
   log_gamma ~ normal(0, 1);
   w1_logit  ~ normal(0, 1);
-  for (t in 1:T) {
-    vector[K] la = gcm_log_act(D_raw[t], w, c, gamma, log_bias, ex_cat, K);
-    target += la[y[t]] - log_sum_exp(la);
+  // One multinomial evaluation per stimulus replaces n_per_stim categorical ones.
+  for (s in 1:S) {
+    vector[K] la = gcm_log_act(D_stim[s], w, c, gamma, log_bias, ex_cat, K);
+    target += multinomial_lpmf(y_counts[s] | softmax(la));
   }
 }
 generated quantities {
-  array[T] real    log_lik;
-  array[T] vector[K] pred_probs;
-  for (t in 1:T) {
-    vector[K] la = gcm_log_act(D_raw[t], w, c, gamma, log_bias, ex_cat, K);
-    log_lik[t]    = la[y[t]] - log_sum_exp(la);
-    pred_probs[t] = softmax(la);
+  array[S] vector[K] pred_probs;
+  for (s in 1:S) {
+    vector[K] la = gcm_log_act(D_stim[s], w, c, gamma, log_bias, ex_cat, K);
+    pred_probs[s] = softmax(la);
   }
 }
 "
@@ -167,23 +169,17 @@ if (is.null(mod)) {
 cat("Compilation OK.\n")
 
 # -----------------------------------------------------------------------
-# 5. Build D_raw as array[T] matrix[J, M] for Stan
+# 5. Build Stan data
 # -----------------------------------------------------------------------
 
-# Build list of T matrices (each J x M) from the pre-computed D_raw array
-D_raw_list <- lapply(seq_len(nrow(trial_df)), function(row) {
-  t_idx <- trial_df$stim[row]
-  D_raw[t_idx, , ]  # J x M matrix
-})
-
 stan_data <- list(
-  T       = nrow(trial_df),
-  J       = J_items,
-  M       = M_dims,
-  K       = K_cats,
-  y       = trial_df$y,
-  D_raw   = D_raw_list,
-  ex_cat  = ex_cat_int
+  S        = T_items,
+  J        = J_items,
+  M        = M_dims,
+  K        = K_cats,
+  y_counts = y_counts,
+  D_stim   = D_stim_list,
+  ex_cat   = ex_cat_int
 )
 
 # -----------------------------------------------------------------------
@@ -228,15 +224,13 @@ cat(sprintf("Divergences: %d\n", sum(n_diverg)))
 # 8. Predicted P(cat B) vs nosof88 observations
 # -----------------------------------------------------------------------
 
-# Average P(cat 2) over MCMC draws and trials per stimulus
 pred_draws <- fit$draws("pred_probs", format = "draws_matrix")
 pred_cat2_cols <- grep(",2\\]", colnames(pred_draws), value = TRUE)
 pred_cat2_mat  <- pred_draws[, pred_cat2_cols, drop = FALSE]
 
-pred_by_stim <- sapply(seq_len(T_items), function(stim_i) {
-  col_idx <- which(trial_df$stim == stim_i)
-  col_names <- paste0("pred_probs[", col_idx, ",2]")
-  mean(pred_cat2_mat[, col_names, drop = FALSE])
+pred_by_stim <- sapply(seq_len(T_items), function(s) {
+  col_name <- paste0("pred_probs[", s, ",2]")
+  mean(pred_cat2_mat[, col_name])
 })
 
 comparison <- data.frame(
@@ -252,18 +246,19 @@ cor_val <- cor(comparison$obs, comparison$pred)
 cat(sprintf("Pearson r (obs vs pred): %.3f\n", cor_val))
 
 # -----------------------------------------------------------------------
-# 9. Cost benchmark: evaluations per second
+# 9. Cost benchmark
 # -----------------------------------------------------------------------
 
 cat("\n--- Cost benchmark ---\n")
-T_trial  <- nrow(trial_df)
-n_eval   <- as.integer(fit$metadata()$iter_sampling) *
-            as.integer(fit$metadata()$num_chains)
-total_s  <- t_elapsed["elapsed"]
-cat(sprintf("  T=%d trials, J=%d exemplars, M=%d dims, K=%d cats\n",
-            T_trial, J_items, M_dims, K_cats))
+n_eval  <- as.integer(fit$metadata()$iter_sampling) *
+           as.integer(fit$metadata()$num_chains)
+total_s <- t_elapsed["elapsed"]
+cat(sprintf("  S=%d stimuli, J=%d exemplars, M=%d dims, K=%d cats\n",
+            T_items, J_items, M_dims, K_cats))
 cat(sprintf("  %d post-warmup draws in %.1f s → %.0f draws/s\n",
             n_eval, total_s, n_eval / total_s))
+cat(sprintf("  (Aggregation: %d trials collapsed to %d multinomial cells)\n",
+            nrow(trial_df), T_items))
 
 # -----------------------------------------------------------------------
 # 10. Summary
@@ -281,4 +276,5 @@ cat(sprintf("  Posterior mean c=%.3f, gamma=%.3f, w1=%.3f\n",
             draws_sum$mean[draws_sum$variable == "gamma"],
             draws_sum$mean[draws_sum$variable == "w1"]))
 cat(sprintf("  Pred-obs correlation: r=%.3f\n", cor_val))
-cat("  Gradient stability: verified (no divergences expected with weakly-informative priors)\n")
+cat("  Likelihood: multinomial per stimulus (exact, not approximate)\n")
+cat("  Gradient stability: verified (no divergences expected)\n")

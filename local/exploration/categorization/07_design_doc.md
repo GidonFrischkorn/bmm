@@ -65,32 +65,21 @@ identifiability concern. Coverage for c is adequate (0.88).
 
 ### 4. Hierarchical proof-of-concept (05_hierarchical.R)
 
-6-subject simulation (N=6, n=15/stim, T=1080) with random effects on
-log(c), log(gamma), and softmax-w1. Non-centred parameterisation,
-stimulus-indexed D_stim (S=12 matrices rather than T matrices), adapt_delta=0.90.
-Sampling time: 924.7 s (4 chains sequential):
+**Phase 1 result (superseded)**: N=6, n=15/stim, T=1080, prior
+`mu_log_c ~ N(0.5, 0.5)`. Sampling time: 924.7 s. `mean_c` true=0.800
+fell outside 90% CI [0.884, 2.028] due to the prior pulling toward
+exp(0.5)≈1.65. Problem shrank from N=20→15→6 due to runtime.
 
-| Param | True | Posterior | 90% CI | In CI |
-|---|---|---|---|---|
-| mean_c | 0.800 | 1.366 | [0.884, 2.028] | NO |
-| mean_gamma | 1.500 | 1.177 | [0.735, 1.734] | YES |
-| mean_w1 | 0.650 | 0.660 | [0.467, 0.809] | YES |
-| sigma_log_c | 0.400 | 0.284 | [0.025, 0.607] | YES |
-| sigma_log_gamma | 0.400 | 0.291 | [0.028, 0.665] | YES |
-| sigma_w1_logit | 0.500 | 1.132 | [0.487, 1.976] | YES |
+**Phase 2a (pending re-run)**: multinomial-aggregated likelihood collapses
+N×S×n Stan evaluations to N×S. For N=20, S=12, n=90: 21,600→240
+evaluations (≈90× faster per MCMC draw). Prior changed to
+`mu_log_c ~ N(0, 1)`. N restored to 20. Expected results pending.
 
-Diagnostics: Rhat_max=1.008, ESS_bulk_min=398, Divergences=0.
-Subject-level recovery: r(c_subj)=0.827, r(w1_subj)=0.906.
-
-**Note on mean_c**: true=0.800 falls outside the 90% CI, consistent with the
-known c-gamma trade-off and the prior Normal(0.5, 0.5) on log(c) pulling
-the posterior toward exp(0.5)≈1.65. Subject-level c is nonetheless well
-recovered (r=0.827). Group mean recovery improves with larger N or more
-informative priors.
-
+Key implementation decisions confirmed:
 - Non-centred parameterisation is stable with adapt_delta=0.90
-- Divergences: 0 confirmed
-- Stimulus-indexed D_stim (12 matrices vs T=1080) avoids data-overhead bottleneck
+- Divergences: 0 confirmed in Phase 1
+- Per-(subj, stimulus) multinomial aggregation is exact (no approximation)
+- Stimulus-indexed D_stim passes 12 matrices, not T matrices
 
 ### 5. Real-data fit (06_realdata_fit.R)
 
@@ -140,26 +129,42 @@ Class stack: `c("bmmodel", "categorization", "gcm", "gcm_exemplar")`.
 
 | Version | Parameter | Link | Default prior |
 |---|---|---|---|
-| all | `c` | log | Normal(0.5, 0.5) |
+| all | `c` | log | Normal(0, 1) |
 | exemplar | `gamma` | log | Normal(0, 0.5) |
 | prototype/prm | `gamma` | fixed = 1 | — |
 | all (M=2) | `w1` | logit (softmax ref) | Normal(0, 1) |
 | all (M>2) | `w1..w_{M-1}` | softmax | Normal(0, 1) each |
 | prm | `p_mem` | logit | Normal(0, 1) |
 
+**Note on `c` prior**: an earlier draft recommended `Normal(0.5, 0.5)` on
+`log(c)`, which pulls the posterior toward `exp(0.5)≈1.65`. Under the
+hierarchical Phase 1 PoC (true `mean_c=0.8`) this placed the true value
+outside the 90% CI. `Normal(0, 1)` is weakly informative across c∈[0.1, 8]
+and should be the default. `Normal(0.5, 0.5)` is appropriate only when the
+coordinate space is known to be scaled such that c≈1–2 is expected a priori.
+
 ### Stan implementation
 
-Pre-compute `D_raw[T, J, M]` in R (`configure_model`), pass as
-`array[T] matrix[J, M] D_raw` via `stanvars`. Stan function
-`gcm_log_act()` takes the pre-computed matrix slice for each trial,
-computes weighted Euclidean distance, exponential similarity, category
-activation sums, then applies Luce-choice with gamma.
+Pre-compute `D_stim[S, J, M]` in R (`configure_model`), pass as
+`array[S] matrix[J, M] D_stim` via `stanvars` where S is the number of
+**unique stimuli** (not total trials). Aggregate trial responses to a
+`[S, K]` (single-subject) or `[N, S, K]` (hierarchical) integer count
+array and pass as `y_counts`. Stan evaluates `multinomial_lpmf` once per
+(stimulus) or per (subject, stimulus) pair.
 
-Cost estimate: ~60–70 draws/s for the nosof88-scale design (T=300, J=12,
-M=2). For the Nosofsky 2022 rocks scale (T=150, J=90, M=8), the inner loop
-over J×M grows linearly: expected ~15–20 draws/s per chain. Compare to m3
-which has no inner exemplar loop: the GCM per-evaluation cost is O(T·J·M),
-while m3 is O(T·K).
+**Why aggregation matters**: the GCM probability for a given stimulus
+depends only on the stimulus coordinates and the model parameters — not on
+trial position. Summing `n` categorical log-likelihoods with the same
+probability vector is identical to one `multinomial_lpmf` on the count
+vector. For a nosof88-scale design with n=25 trials/stim, this collapses
+300 categorical evaluations to 12 multinomial evaluations (25× faster per
+additional replicate). For the hierarchical case (N subjects) it collapses
+N×S×n evaluations to N×S.
+
+Cost estimate: ~60–70 draws/s for the nosof88 prototype (S=12, J=12, M=2,
+n=25/stim). The rocks scale (S≈150, J=90, M=8) requires benchmarking;
+the O(S·J·M) per-draw cost replaces the previous O(T·J·M), where
+T=S×n. Benchmark vs m3 is Phase 2b.
 
 ### bmmformula interface
 

@@ -1,7 +1,7 @@
 # GCM / Prototype Categorization Models — Exploration
 
 **Issue**: [#19](https://github.com/GidonFrischkorn/bmm/issues/19)  
-**Status**: Complete  
+**Status**: Phase 2a in progress — multinomial aggregation + prior recalibration  
 
 Exploration of Nosofsky's Generalized Context Model (GCM) and its prototype
 analogue for integration into bmm's multinomial infrastructure.
@@ -27,14 +27,17 @@ analogue for integration into bmm's multinomial infrastructure.
    0 divergences, and pred-obs r=0.978 at ~61 draws/s (T=300, J=12, M=2).
 
 3. **c-gamma identifiability**: sensitivity `c` and response scaling `gamma`
-   are partially non-identified in small designs. Recommended fix:
-   `log(c) ~ Normal(0.5, 0.5)` and `log(gamma) ~ Normal(0, 0.5)` as default
-   priors. Prototype version fixes gamma=1 (Nosofsky & Zaki 2002).
+   are partially non-identified in small designs. Recommended defaults:
+   `log(c) ~ Normal(0, 1)` and `log(gamma) ~ Normal(0, 0.5)`. The tighter
+   `Normal(0.5, 0.5)` on log(c) pulls posteriors toward exp(0.5)≈1.65 and
+   should not be used as a default. Prototype version fixes gamma=1
+   (Nosofsky & Zaki 2002).
 
 4. **w1 (attention weight) recovers well** across all scenarios (r=0.77).
 
 5. **Hierarchical GCM is feasible** with non-centred parameterisation and
-   adapt_delta=0.90.
+   adapt_delta=0.90. **Phase 2a**: multinomial-aggregated likelihood
+   (N×S evaluations vs N×S×n) enables N≥20 at manageable runtime.
 
 6. **Real data**: GCM fits all 3 nosof88 conditions with r>0.97 and 0
    divergences. Condition-specific attention shifts are present but modest.

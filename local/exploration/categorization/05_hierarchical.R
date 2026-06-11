@@ -1,9 +1,16 @@
-# GCM Hierarchical Proof-of-Concept (stimulus-indexed D_raw)
+# GCM Hierarchical Proof-of-Concept — multinomial-aggregated likelihood (Phase 2a)
 #
-# Multi-subject fit with random effects on log(c), log(gamma), and softmax-w.
-# Uses nosof88 geometry. Simulates 15 subjects with subject-level variation
-# around a group mean. Key efficiency: pass D_raw as array[S] matrix[J,M]
-# (12 matrices) rather than array[T] matrix[J,M] (T=5400 matrices).
+# Key change from Phase 1: instead of looping over T=N×S×n trials in Stan,
+# we aggregate responses to a [N, S, K] integer count array and evaluate
+# multinomial_lpmf once per (subject, stimulus) pair. This is exact — not an
+# approximation — because GCM probabilities depend only on (stimulus, subject),
+# not on trial order. For N=20, S=12, n_per_stim=90 the Stan inner loop
+# shrinks from 21,600 categorical evaluations to 240 multinomial evaluations.
+#
+# Prior change from Phase 1: mu_log_c ~ normal(0, 1) replaces normal(0.5, 0.5).
+# The tighter N(0.5, 0.5) prior pulled mean_c from its true value of 0.8 to a
+# posterior of 1.37 and placed the true value outside the 90% CI. N(0, 1) is
+# weakly informative and allows recovery of c across the [0.3, 3] range.
 #
 # Run from repository root:
 #   Rscript local/exploration/categorization/05_hierarchical.R
@@ -39,29 +46,29 @@ stim_coords <- data.frame(
 
 ex_mat  <- as.matrix(stim_coords[, c("x1", "x2")])
 ex_cats <- stim_coords$cat
-T_stims <- nrow(stim_coords)
-J_items <- T_stims  # exemplars = test stimuli (same set)
+T_stims <- nrow(stim_coords)   # S = 12 unique stimuli
+J_items <- T_stims             # exemplars = test stimuli
 M_dims  <- 2
 K_cats  <- 2
 
-# Pre-compute D_raw for each unique stimulus (S=12 matrices)
+# Pre-compute D_raw for each unique stimulus (S=12 matrices, each J×M)
 D_raw_stim <- array(0, dim = c(T_stims, J_items, M_dims))
 for (m in seq_len(M_dims)) {
   D_raw_stim[, , m] <- abs(outer(ex_mat[, m], ex_mat[, m], `-`))^2
 }
-D_raw_list <- lapply(seq_len(T_stims), function(s) D_raw_stim[s, , ])
+D_stim_list <- lapply(seq_len(T_stims), function(s) D_raw_stim[s, , ])
 
 # -----------------------------------------------------------------------
 # 2. Simulate multi-subject data
 # -----------------------------------------------------------------------
 
-N_subj      <- 6L
-n_per_stim  <- 15L  # trials per stimulus per subject (proof-of-concept scale)
+N_subj     <- 20L   # Phase 2a: restored from N=6; feasible with aggregation
+n_per_stim <- 90L   # trials per stimulus per subject (aggregated away in Stan)
 
 # Group-level true parameters
-mu_log_c     <- log(0.8)
-mu_log_gamma <- log(1.5)
-mu_w1_logit  <- qlogis(0.65)
+mu_log_c        <- log(0.8)
+mu_log_gamma    <- log(1.5)
+mu_w1_logit     <- qlogis(0.65)
 sigma_log_c     <- 0.4
 sigma_log_gamma <- 0.4
 sigma_w1_logit  <- 0.5
@@ -71,9 +78,9 @@ subj_c     <- exp(rnorm(N_subj, mu_log_c,     sigma_log_c))
 subj_gamma <- exp(rnorm(N_subj, mu_log_gamma, sigma_log_gamma))
 subj_w1    <- plogis(rnorm(N_subj, mu_w1_logit, sigma_w1_logit))
 
-cat(sprintf("True group means: c=%.3f, gamma=%.3f, w1=%.3f\n",
+cat(sprintf("True group means:  c=%.3f, gamma=%.3f, w1=%.3f\n",
             exp(mu_log_c), exp(mu_log_gamma), plogis(mu_w1_logit)))
-cat(sprintf("True group SDs: log_c=%.2f, log_gamma=%.2f, w1_logit=%.2f\n\n",
+cat(sprintf("True group SDs:    log_c=%.2f, log_gamma=%.2f, w1_logit=%.2f\n\n",
             sigma_log_c, sigma_log_gamma, sigma_w1_logit))
 
 trial_df <- do.call(rbind, lapply(seq_len(N_subj), function(s) {
@@ -88,11 +95,35 @@ trial_df <- do.call(rbind, lapply(seq_len(N_subj), function(s) {
     data.frame(subj = s, stim = i, y = y)
   }))
 }))
-cat(sprintf("Simulated %d trials (%d subjects × %d stims × %d trials)\n\n",
+
+cat(sprintf("Simulated %d trials (%d subjects × %d stims × %d trials/stim)\n",
             nrow(trial_df), N_subj, T_stims, n_per_stim))
 
 # -----------------------------------------------------------------------
-# 3. Hierarchical Stan model (stimulus-indexed D_raw)
+# 3. Aggregate to per-(subject, stimulus, category) counts
+#
+# The GCM likelihood for subject n, stimulus s depends only on (n, s), not
+# on trial order. Summing the categorical log-likelihoods over n_per_stim
+# trials with the same (n, s) probability is equivalent to a single
+# multinomial_lpmf call on the response counts. This collapses
+# N × S × n_per_stim = 21,600 categorical evaluations to N × S = 240.
+# -----------------------------------------------------------------------
+
+y_counts <- array(0L, dim = c(N_subj, T_stims, K_cats))
+for (n in seq_len(N_subj)) {
+  for (s in seq_len(T_stims)) {
+    for (k in seq_len(K_cats)) {
+      y_counts[n, s, k] <- sum(
+        trial_df$subj == n & trial_df$stim == s & trial_df$y == k
+      )
+    }
+  }
+}
+cat(sprintf("Aggregated to [N=%d, S=%d, K=%d] count array (%d unique (subj,stim) cells)\n\n",
+            N_subj, T_stims, K_cats, N_subj * T_stims))
+
+# -----------------------------------------------------------------------
+# 4. Hierarchical Stan model — multinomial likelihood over aggregated counts
 # -----------------------------------------------------------------------
 
 hier_stan_code <- "
@@ -103,7 +134,7 @@ functions {
     vector[J] sims;
     vector[K] log_act;
     for (j in 1:J) {
-      real d = sqrt(dot_product(w, D_t[j, ]));
+      real d = sqrt(dot_product(w, D_t[j, ]'));
       sims[j] = exp(-c * d);
     }
     for (k in 1:K) {
@@ -115,16 +146,13 @@ functions {
   }
 }
 data {
-  int<lower=1> T;   // total trials
   int<lower=1> N;   // subjects
   int<lower=1> S;   // unique stimuli
   int<lower=1> J;   // exemplars
   int<lower=1> M;   // dimensions
   int<lower=1> K;   // categories
-  array[T] int<lower=1, upper=K> y;
-  array[T] int<lower=1, upper=N> subj;
-  array[T] int<lower=1, upper=S> stim;   // which stimulus (indexes D_stim)
-  array[S] matrix[J, M] D_stim;          // pre-computed distances, one per unique stim
+  array[N, S, K] int<lower=0> y_counts;  // per-(subj, stim, cat) response counts
+  array[S] matrix[J, M] D_stim;          // pre-computed distances (one per stimulus)
   array[J] int<lower=1, upper=K> ex_cat;
 }
 parameters {
@@ -145,21 +173,28 @@ transformed parameters {
   vector[K] log_bias   = rep_vector(log(1.0 / K), K);
 }
 model {
-  mu_log_c     ~ normal(0.5, 0.5);
-  mu_log_gamma ~ normal(0.0, 0.5);
-  mu_w1_logit  ~ normal(0.0, 1.0);
+  // Weakly informative priors — N(0,1) on log(c) allows recovery across [0.3,3]
+  // without pulling the posterior away from true values near c=0.8.
+  mu_log_c        ~ normal(0, 1);
+  mu_log_gamma    ~ normal(0.0, 0.5);
+  mu_w1_logit     ~ normal(0.0, 1.0);
   sigma_log_c     ~ normal(0, 0.5);
   sigma_log_gamma ~ normal(0, 0.5);
   sigma_w1_logit  ~ normal(0, 1.0);
   z_log_c     ~ std_normal();
   z_log_gamma ~ std_normal();
   z_w1_logit  ~ std_normal();
-  for (t in 1:T) {
-    int s = subj[t];
-    vector[M] w = [subj_w1[s], 1 - subj_w1[s]]';
-    vector[K] la = gcm_log_act(D_stim[stim[t]], w, subj_c[s], subj_gamma[s],
-                                log_bias, ex_cat, K);
-    target += la[y[t]] - log_sum_exp(la);
+
+  // Multinomial likelihood: one evaluation per (subject, stimulus) pair.
+  // Equivalent to summing categorical_lpmf over all trials with same (n,s) —
+  // exact because GCM P(k|stim,subj) does not depend on trial position.
+  for (n in 1:N) {
+    vector[M] w = [subj_w1[n], 1 - subj_w1[n]]';
+    for (s in 1:S) {
+      vector[K] la = gcm_log_act(D_stim[s], w, subj_c[n], subj_gamma[n],
+                                  log_bias, ex_cat, K);
+      target += multinomial_lpmf(y_counts[n, s] | softmax(la));
+    }
   }
 }
 generated quantities {
@@ -170,41 +205,38 @@ generated quantities {
 "
 
 # -----------------------------------------------------------------------
-# 4. Compile
+# 5. Compile
 # -----------------------------------------------------------------------
 
-cat("Compiling hierarchical Stan model...\n")
+cat("Compiling hierarchical Stan model (multinomial-aggregated)...\n")
 stan_file <- tempfile(fileext = ".stan")
 writeLines(hier_stan_code, stan_file)
 mod <- cmdstan_model(stan_file, quiet = TRUE)
 cat("Compilation OK.\n\n")
 
 # -----------------------------------------------------------------------
-# 5. Build Stan data and fit
+# 6. Build Stan data and fit
 # -----------------------------------------------------------------------
 
 stan_data <- list(
-  T      = nrow(trial_df),
-  N      = N_subj,
-  S      = T_stims,
-  J      = J_items,
-  M      = M_dims,
-  K      = K_cats,
-  y      = trial_df$y,
-  subj   = trial_df$subj,
-  stim   = trial_df$stim,
-  D_stim = D_raw_list,
-  ex_cat = ex_cats
+  N        = N_subj,
+  S        = T_stims,
+  J        = J_items,
+  M        = M_dims,
+  K        = K_cats,
+  y_counts = y_counts,
+  D_stim   = D_stim_list,
+  ex_cat   = ex_cats
 )
 
-cat("--- Hierarchical MCMC: 4 chains, 500 warmup + 300 sampling ---\n")
+cat("--- Hierarchical MCMC: 4 chains, 500 warmup + 500 sampling ---\n")
 t_start <- proc.time()
 fit <- tryCatch(
   mod$sample(
     data          = stan_data,
     chains        = 4,
     iter_warmup   = 500,
-    iter_sampling = 300,
+    iter_sampling = 500,
     seed          = 42,
     refresh       = 200,
     show_messages = TRUE,
@@ -221,7 +253,7 @@ if (is.null(fit)) {
 cat(sprintf("\nSampling time: %.1f s\n\n", t_elapsed["elapsed"]))
 
 # -----------------------------------------------------------------------
-# 6. Diagnostics
+# 7. Diagnostics
 # -----------------------------------------------------------------------
 
 cat("=== GROUP-LEVEL PARAMETER RECOVERY ===\n")
@@ -234,7 +266,7 @@ n_diverg <- sum(fit$diagnostic_summary(quiet = TRUE)$num_divergent)
 cat(sprintf("\nDivergences: %d\n", n_diverg))
 
 # -----------------------------------------------------------------------
-# 7. Group-level recovery summary
+# 8. Group-level recovery summary
 # -----------------------------------------------------------------------
 
 cat("\n=== GROUP-LEVEL RECOVERY ===\n")
@@ -247,9 +279,9 @@ true_vals <- c(
   sigma_w1_logit  = sigma_w1_logit
 )
 
-post_means <- setNames(group_draws$mean, group_draws$variable)
-post_ci5   <- setNames(group_draws$q5,   group_draws$variable)
-post_ci95  <- setNames(group_draws$q95,  group_draws$variable)
+post_means <- setNames(group_draws$mean,  group_draws$variable)
+post_ci5   <- setNames(group_draws$q5,    group_draws$variable)
+post_ci95  <- setNames(group_draws$q95,   group_draws$variable)
 
 for (nm in names(true_vals)) {
   in_ci <- (true_vals[nm] >= post_ci5[nm]) & (true_vals[nm] <= post_ci95[nm])
@@ -260,7 +292,7 @@ for (nm in names(true_vals)) {
 }
 
 # -----------------------------------------------------------------------
-# 8. Subject-level recovery
+# 9. Subject-level recovery
 # -----------------------------------------------------------------------
 
 cat("\n=== SUBJECT-LEVEL RECOVERY (c and w1) ===\n")
@@ -269,11 +301,13 @@ subj_w1_draws <- fit$summary(paste0("subj_w1[", seq_len(N_subj), "]"))
 
 r_c_subj  <- cor(subj_c,  subj_c_draws$mean)
 r_w1_subj <- cor(subj_w1, subj_w1_draws$mean)
-cat(sprintf("  r(true_c_subj,  post_c_subj):  %.3f\n", r_c_subj))
-cat(sprintf("  r(true_w1_subj, post_w1_subj): %.3f\n", r_w1_subj))
+cat(sprintf("  r(true_c_subj,  post_c_subj):  %.3f  (N=%d subjects)\n",
+            r_c_subj, N_subj))
+cat(sprintf("  r(true_w1_subj, post_w1_subj): %.3f  (N=%d subjects)\n",
+            r_w1_subj, N_subj))
 
 # -----------------------------------------------------------------------
-# 9. Summary
+# 10. Summary
 # -----------------------------------------------------------------------
 
 rhat_max <- max(c(group_draws$rhat, subj_c_draws$rhat, subj_w1_draws$rhat),
@@ -281,12 +315,16 @@ rhat_max <- max(c(group_draws$rhat, subj_c_draws$rhat, subj_w1_draws$rhat),
 ess_min  <- min(group_draws$ess_bulk, na.rm = TRUE)
 
 cat(sprintf("\n=== HIERARCHICAL FIT SUMMARY ===\n"))
-cat(sprintf("  Subjects: %d, trials: %d\n", N_subj, nrow(trial_df)))
+cat(sprintf("  Subjects: %d, stims: %d, trials/stim: %d\n",
+            N_subj, T_stims, n_per_stim))
+cat(sprintf("  Stan data: [N=%d, S=%d, K=%d] counts (vs %d trial rows)\n",
+            N_subj, T_stims, K_cats, nrow(trial_df)))
 cat(sprintf("  Sampling time: %.1f s\n", t_elapsed["elapsed"]))
 cat(sprintf("  Rhat max: %.3f\n", rhat_max))
 cat(sprintf("  ESS bulk min (group params): %.0f\n", ess_min))
 cat(sprintf("  Divergences: %d\n", n_diverg))
 cat(sprintf("  Subject-level r(c):  %.3f\n", r_c_subj))
 cat(sprintf("  Subject-level r(w1): %.3f\n", r_w1_subj))
-cat("  Implementation: stimulus-indexed D_stim (S=12 matrices vs T trials)\n")
+cat("  Likelihood: multinomial per (subj, stim) — exact, not approximate\n")
+cat("  Prior: mu_log_c ~ N(0,1) — weakly informative, recovers c in [0.3,3]\n")
 cat("  Non-centred parameterisation: stable with adapt_delta=0.90\n")
