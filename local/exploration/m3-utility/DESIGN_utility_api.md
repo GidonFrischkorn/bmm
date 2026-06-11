@@ -1,8 +1,8 @@
 # Design Memo: Utility-Theory API for bmm M3
 
-**Date:** 2026-06-11 (revised round 6; original round 3)  
+**Date:** 2026-06-11 (revised round 7: R9/R10 corrected; round 6 original)  
 **Branch:** feat/issue-7-m3-utility-exploration  
-**Author:** thom-more (agent run, rounds 3 and 5)  
+**Author:** thom-more (agent run, rounds 3, 5, and 7)  
 **Status:** Exploration — not yet merged to R/
 
 ---
@@ -123,7 +123,8 @@ not prevented. Both are silent-wrong in typical use.
 
 ## 3. Requirements × Architecture Coverage Matrix
 
-Based on the 10 requirements in `14_requirements_inventory.md` (R8–R10 added in round 6 from WP5).
+Based on the requirements in `14_requirements_inventory.md` (R8 from round 6; R9/R10
+corrected in round 7 — see §3 note below).
 
 **Severity codes:** SW = silent-wrong (worst), RE = runtime error, F = friction, ✅ = resolved
 
@@ -137,25 +138,32 @@ Based on the 10 requirements in `14_requirements_inventory.md` (R8–R10 added i
 | R6 Utility × weighting composition | F | ✅ `utility=` + `weighting=` args | ✅ | ❌ requires multiple version entries | ❌ manual formula |
 | R7 Parameter labelling | F | F: brms NL names | ~ `postprocess_brm.m3_utility` | F: brms NL names | F: brms NL names |
 | R8 Fixed payoff coefficients (welfare) | SW | ❌ out of scope | ❌ out of scope | ❌ out of scope | ❌ raw brms only |
-| R9 Luce/simple rule, non-linear utility | RE | ❌ partial³ | ❌ partial³ | ❌ partial³ | ❌ raw brms only |
-| R10 Numeraire fixing (`b = 1`) | SW | ❌ semantic mismatch | ❌ semantic mismatch | ❌ semantic mismatch | ❌ documented only |
+| R9 Positivity hazard (identity link + simple rule) | RE | ✅⁴ lower-bounded priors | ✅⁴ + guard G4 | ✅⁴ | ✅⁴ |
+| R10 Numeraire fixing (docs gap only) | F | ✅ `fixed_parameters$b` works (helpers-prior.R:147) | ✅ auto-set by constructor | ✅ via version table | F: documented |
 
 ¹ Updating `construct_m3_act_funs()` for "utility" version would be required;
   this is as much work as Option A production.
 ² `check_utility_design(model, data)` from `16_identifiability_guards.R` works
   as a manual pre-flight validator but is not auto-dispatched.
-³ Luce rule equals softmax only when `n_k=1` for all categories and utility is log-linear;
-  non-linear payoff-matrix forms (E_A) require raw brms NLF formulas regardless of architecture.
+⁴ R9 is resolved in ALL architectures by lower-bounded priors (`T[0,]` or `lb=0`).
+  In production, guard G4 (`16_identifiability_guards.R`) makes the required bound
+  explicit. R9 is NOT a structural barrier — see §3 note below.
 
-**New from round 6 (WP5):** R8–R10 represent a *structurally different* use-case regime —
-the welfare-weight model (Gross et al. 2025) requires fixed payoff coefficients, a Luce
-choice rule over constrained non-linear utilities, and a numeraire parameter that conflicts
-semantically with M3's background noise. All architectures treat this as "out of scope" for
-Stage 1–2. It belongs in a **Stage 3** extension or as a standalone raw-brms recipe
-(`21_welfare_weight.R`). The structural equivalence E_D = E_A = Model D (confirmed in WP5:
-Δlog-lik = 0.000) means that the welfare-weight parameters can be *recovered post-hoc* from
-any standard m3_utility fit via the reparametrization:
-  `wi = exp(alpha_D) − 0.5`  and  `wo = (exp(alpha_D + beta_D) − 0.3 − 0.6·wi) / 0.9`.
+**Round 7 correction to R9 and R10.**  Round 6 mischaracterized both requirements.
+- **R9 (corrected):** The claim "Luce/simple rule with non-linear utility requires raw brms"
+  was wrong. `glue_choice_rule_functions()` (R/model_m3.R:399–404) generates
+  `log({cat} * n_options)` for the simple rule, which is natively the Luce ratio rule
+  for n_options=1. `22_welfare_bmm_simple.R` confirms wi=1.2, wo=0.8 recovery using
+  only `m3(choice_rule="simple")` — no raw brms. The real hazard is positivity:
+  identity-linked parameters can produce negative activations → `log(negative)` in Stan.
+  Guard G4 in `16_identifiability_guards.R` addresses this.
+- **R10 (corrected):** The claim that `fixed_parameters$b = 1.0` "conflicts semantically
+  with M3's background noise" was factually wrong. `b` in `fixed_parameters` IS the
+  formula parameter `b` that appears in activation formulas. Setting it to 1.0 is the
+  correct and supported numeraire mechanism: `fixed_pars_priors()` (R/helpers-prior.R:147)
+  converts it to `constant(1)` automatically; `update_model_fixed_parameters()`
+  (R/helpers-model.R:165) syncs it at check_model time. R10 is a documentation gap,
+  not a correctness problem. Severity downgraded from SW to F.
 
 **Key finding from round 5:** The critical distinction between Option A exploration and
 Option A production is whether `m3_utility()` adds `"m3_utility"` to the class vector
@@ -252,11 +260,17 @@ The revised recommendation is a **staged path**:
 **Stage 1 (near-term, M3 utility extension):**
 Move `m3_utility()` to `R/model_m3_utility.R` with:
 - Class: `c("bmmodel", "m3", "m3_custom", "m3_utility")`
-- `check_data.m3_utility`: identifiability guards G1–G3 (from `16_identifiability_guards.R`)
+- `check_data.m3_utility`: identifiability guards G1–G4 (from `16_identifiability_guards.R`)
+  - G1: range criterion for power utility (max(V)/min(V) ≥ 3), warning not error
+  - G2: variable set sizes required for Prelec, error
+  - G3: value variation required for EU slope, error
+  - G4: positivity hazard for identity-linked utility with simple rule, warning
 - `m3_utility_formula()`: per-category activation formula generator
-- Default priors and links embedded in constructor
+- Default priors: lower-bounded (`lb=0`) for identity-linked utility params
+- `fixed_parameters$b` auto-set (numeraire) — no user action needed
 
-This resolves R1–R4, R6, R7. Estimated: ~150 lines of R + tests + 1 vignette section.
+This resolves R1–R4, R6, R7, R9 (via G4). R10 resolved by auto-setting `fixed_parameters$b`.
+R8 remains out of scope for Stage 1. Estimated: ~180 lines of R + tests + 1 vignette section.
 
 **Stage 2 (later, binary PT extension):**
 Add `binary_pt()` as a separate sibling constructor in `R/model_binary_pt.R`:
@@ -351,20 +365,21 @@ Note: `check_model.m3_custom`, `check_data.m3`, `configure_model.m3` are inherit
 | Option | R1 formula trap | R4 identifiability | R5 binary PT | Maintenance | Recommended |
 |---|---|---|---|---|---|
 | A (exploration) | ✅ | ❌ manual only | ❌ | Low | No — incomplete |
-| A (production, Stage 1) | ✅ | ✅ | ❌ | Medium | **YES (Stage 1)** |
+| A (production, Stage 1) | ✅ | ✅ | ❌ | Medium | **YES (Stage 1)** | Resolves R1–R4, R6, R7, R9 (G4), R10 |
 | B — version="utility" | ❌¹ | ~ | ❌ | Medium | No |
 | C — sibling utility() | ✅ | ✅ | ✅ | High | No (premature) |
 | Binary PT separately (Stage 2) | N/A | N/A | ✅ | Medium | **YES (Stage 2, later)** |
 
 ¹ Unless `construct_m3_act_funs()` is also updated, which is equivalent effort to Stage 1.
 
-**Next step:** Move Stage 1 files to R/ in a separate upstream PR. The round 6 empirical
+**Next step:** Move Stage 1 files to R/ in a separate upstream PR. The round 6–7 empirical
 evidence is now complete:
-- WP1 (power utility recovery): both designs cover (gamma, rho) at N=30×90; rho CI ratio=1.2× → guard G1 needs nuanced justification beyond 3-level vs 2-level alone
+- WP1 (power utility recovery): both designs cover (gamma, rho) at N=30×90; rho CI ratio=1.2× → guard G1 needs range criterion (max(V)/min(V) ≥ 3), demoted from error to warning
 - WP2 (hierarchical Prelec): clean recovery, 0 divergences; no false positives at alpha=1.0 → guard G2 validated
 - WP3 (composite PT): ALL params covered with adapt_delta=0.95, N=30×120; cor(c,alpha)=0.906 — confound confirmed but not fatal with adequate sampling
 - WP4 (stage confusion): |ELPD diff| < 0.2 — E and D indistinguishable at fixed-effects level → design manipulation required
-- WP5 (welfare weights): E_D = E_A = Model D (Δlog-lik=0.000); R8–R10 documented; Stage 1 cannot express welfare-weight use case
+- WP5 (welfare weights): E_D ≈ Model D (Δlog-lik = 0.000); u_EA non-covered at near-indifference (R7 note); R8 genuine new requirement; R9 and R10 corrected (see §3 note)
+- Round 7 WP1: 22_welfare_bmm_simple.R confirms m3(choice_rule="simple") + identity links + fixed_parameters$b=1.0 → wi=1.2, wo=0.8 recovery without raw brms
 
 ---
 
