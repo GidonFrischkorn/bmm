@@ -165,12 +165,13 @@ fit_tv <- brm(
   family   = binomial(),
   backend  = "cmdstanr",
   chains   = 4,
-  iter     = 2000,
-  warmup   = 1000,
+  iter     = 4000,
+  warmup   = 2000,
   cores    = 4,
   seed     = 42,
   silent   = 2,
-  refresh  = 0
+  refresh  = 0,
+  control  = list(adapt_delta = 0.99)
 )
 
 cat("\nModel summary:\n")
