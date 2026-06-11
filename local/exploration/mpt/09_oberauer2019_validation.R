@@ -47,7 +47,9 @@ cat(sprintf("Participants: %d, Conditions: %d, Total rows: %d\n",
             length(unique(dat$id)), length(unique(dat$setsize)), nrow(dat)))
 
 # Design-fixed guessing covariates
+# Rename f* columns to match tree response-category names used by data_prep
 dat <- dat |>
+  rename(correct = fcorrect, other = fother, npl = fnpl) |>
   mutate(
     GcorrPi    = 1 / rsizeList,
     GcorrNoPi  = 1 / (rsizeList + rsizeNPL),
@@ -68,9 +70,9 @@ cat(sprintf("  Csetsize  : [%.1f, %.1f] (mean of unique setsizes = %.1f)\n",
 cat("\nAggregate response proportions:\n")
 dat |>
   summarise(
-    correct = sum(fcorrect) / sum(n),
-    other   = sum(fother)   / sum(n),
-    npl     = sum(fnpl)     / sum(n)
+    correct = sum(correct) / sum(n),
+    other   = sum(other)   / sum(n),
+    npl     = sum(npl)     / sum(n)
   ) |>
   print()
 
