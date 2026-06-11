@@ -1,6 +1,6 @@
 # Design Memo: Utility-Theory API for bmm M3
 
-**Date:** 2026-06-11 (revised round 5; original round 3)  
+**Date:** 2026-06-11 (revised round 6; original round 3)  
 **Branch:** feat/issue-7-m3-utility-exploration  
 **Author:** thom-more (agent run, rounds 3 and 5)  
 **Status:** Exploration — not yet merged to R/
@@ -123,7 +123,7 @@ not prevented. Both are silent-wrong in typical use.
 
 ## 3. Requirements × Architecture Coverage Matrix
 
-Based on the 7 requirements in `14_requirements_inventory.md`.
+Based on the 10 requirements in `14_requirements_inventory.md` (R8–R10 added in round 6 from WP5).
 
 **Severity codes:** SW = silent-wrong (worst), RE = runtime error, F = friction, ✅ = resolved
 
@@ -136,11 +136,26 @@ Based on the 7 requirements in `14_requirements_inventory.md`.
 | R5 Binary PT (attribute data) | RE | ❌ out of scope | ❌ out of scope | ❌ out of scope | ❌ raw brms only |
 | R6 Utility × weighting composition | F | ✅ `utility=` + `weighting=` args | ✅ | ❌ requires multiple version entries | ❌ manual formula |
 | R7 Parameter labelling | F | F: brms NL names | ~ `postprocess_brm.m3_utility` | F: brms NL names | F: brms NL names |
+| R8 Fixed payoff coefficients (welfare) | SW | ❌ out of scope | ❌ out of scope | ❌ out of scope | ❌ raw brms only |
+| R9 Luce/simple rule, non-linear utility | RE | ❌ partial³ | ❌ partial³ | ❌ partial³ | ❌ raw brms only |
+| R10 Numeraire fixing (`b = 1`) | SW | ❌ semantic mismatch | ❌ semantic mismatch | ❌ semantic mismatch | ❌ documented only |
 
 ¹ Updating `construct_m3_act_funs()` for "utility" version would be required;
   this is as much work as Option A production.
 ² `check_utility_design(model, data)` from `16_identifiability_guards.R` works
   as a manual pre-flight validator but is not auto-dispatched.
+³ Luce rule equals softmax only when `n_k=1` for all categories and utility is log-linear;
+  non-linear payoff-matrix forms (E_A) require raw brms NLF formulas regardless of architecture.
+
+**New from round 6 (WP5):** R8–R10 represent a *structurally different* use-case regime —
+the welfare-weight model (Gross et al. 2025) requires fixed payoff coefficients, a Luce
+choice rule over constrained non-linear utilities, and a numeraire parameter that conflicts
+semantically with M3's background noise. All architectures treat this as "out of scope" for
+Stage 1–2. It belongs in a **Stage 3** extension or as a standalone raw-brms recipe
+(`21_welfare_weight.R`). The structural equivalence E_D = E_A = Model D (confirmed in WP5:
+Δlog-lik = 0.000) means that the welfare-weight parameters can be *recovered post-hoc* from
+any standard m3_utility fit via the reparametrization:
+  `wi = exp(alpha_D) − 0.5`  and  `wo = (exp(alpha_D + beta_D) − 0.3 − 0.6·wi) / 0.9`.
 
 **Key finding from round 5:** The critical distinction between Option A exploration and
 Option A production is whether `m3_utility()` adds `"m3_utility"` to the class vector
@@ -343,10 +358,13 @@ Note: `check_model.m3_custom`, `check_data.m3`, `configure_model.m3` are inherit
 
 ¹ Unless `construct_m3_act_funs()` is also updated, which is equivalent effort to Stage 1.
 
-**Next step:** Move Stage 1 files to R/ in a separate upstream PR, after rendering
-README.qmd and completing the remaining identifiability fits (power utility 3-level
-recovery, hierarchical Prelec, composite PT joint identifiability, stage-confusion
-LOO matrix — deferred to the next exploration round per GidonFrischkorn's instructions).
+**Next step:** Move Stage 1 files to R/ in a separate upstream PR. The round 6 empirical
+evidence is now complete:
+- WP1 (power utility recovery): both designs cover (gamma, rho) at N=30×90; rho CI ratio=1.2× → guard G1 needs nuanced justification beyond 3-level vs 2-level alone
+- WP2 (hierarchical Prelec): clean recovery, 0 divergences; no false positives at alpha=1.0 → guard G2 validated
+- WP3 (composite PT): ALL params covered with adapt_delta=0.95, N=30×120; cor(c,alpha)=0.906 — confound confirmed but not fatal with adequate sampling
+- WP4 (stage confusion): |ELPD diff| < 0.2 — E and D indistinguishable at fixed-effects level → design manipulation required
+- WP5 (welfare weights): E_D = E_A = Model D (Δlog-lik=0.000); R8–R10 documented; Stage 1 cannot express welfare-weight use case
 
 ---
 
