@@ -26,11 +26,9 @@ options(mc.cores = 4)
 eqn_dir <- "local/exploration/mpt/binding_models"
 spec     <- build_binding_spec(file.path(eqn_dir, "unitization.eqn"), constants)
 long     <- build_long_data(file.path(eqn_dir, "exp1_response_frequencies.csv"))
-data_fit <- spec$data_prep(long)
 
 cat("Unitization model spec:\n")
 print(spec)
-cat("\nData dimensions:", nrow(data_fit), "rows,", ncol(data_fit), "cols\n")
 
 # ---------------------------------------------------------------------------
 # Predictor formulas: all 12 free params with full correlated RE (|p| id)
@@ -46,6 +44,9 @@ out <- mpt_to_brms(
   response_col       = spec$resp_cats[1],
   trials_col         = "n"
 )
+
+data_fit <- out$data_prep(long)
+cat("\nData dimensions:", nrow(data_fit), "rows,", ncol(data_fit), "cols\n")
 
 cat("\nbrms formula:\n")
 print(out$brms_formula)
