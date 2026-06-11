@@ -1,0 +1,4 @@
+"fit","param","true_value","estimate","ci_lower","ci_upper","covered","max_rhat","divergences","elapsed_sec"
+"smoke_A_UC1","a",2,2.00777923026,0.8451048515,3.134499425,TRUE,1.0158701093398,4,79.1
+"smoke_A_UC1","c",3,2.9535153914,2.76685035,3.13980291,TRUE,1.0158701093398,4,79.1
+"smoke_A_UC1","gamma",0.8,1.3300790451,0.46340141125,2.7682379075,TRUE,1.0158701093398,4,79.1

@@ -111,8 +111,11 @@ m3_utility <- function(resp_cats,
     )
     if (utility == "power") {
       extra_links[["rho"]] <- "log"      # rho > 0; log link
+      # Prior on log(rho) — the linear predictor with log link.
+      # normal(0, 0.5) on log scale corresponds to rho ~ lognormal(0, 0.5),
+      # i.e. median rho = 1 (linear utility), 95% range ≈ [0.37, 2.7].
       extra_priors[["rho"]] <- list(
-        main    = "lognormal(0, 0.5)",
+        main    = "normal(0, 0.5)",
         effects = "normal(0, 0.3)"
       )
     }
@@ -120,8 +123,14 @@ m3_utility <- function(resp_cats,
 
   if (weighting == "prelec") {
     extra_links[["alpha"]] <- "log"      # alpha > 0; log link
+    # Prior on log(alpha) — the linear predictor with log link.
+    # normal(0, 0.5) on log scale corresponds to alpha ~ lognormal(0, 0.5),
+    # i.e. median alpha = 1 (linear probability weighting), 95% range ≈ [0.37, 2.7].
+    # Do NOT use lognormal() here — that is a prior on the raw parameter,
+    # not on the log-scale linear predictor. brms would flag this with a
+    # "lower bounded prior on parameter with no natural lower bound" warning.
     extra_priors[["alpha"]] <- list(
-      main    = "lognormal(0, 0.5)",
+      main    = "normal(0, 0.5)",
       effects = "normal(0, 0.2)"
     )
   }
