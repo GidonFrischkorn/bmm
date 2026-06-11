@@ -56,7 +56,7 @@ print(out$brms_formula)
 # ---------------------------------------------------------------------------
 # normal(0,1) on probit-scale intercepts (matches paper's mu ~ dnorm(0,1))
 # student_t(3,0,1) on SDs; lkj(1) on correlation matrix
-l_params <- names(out$link_params)
+l_params <- as.character(out$link_params)  # values = l-param names
 priors <- do.call(c, lapply(l_params, function(lp) {
   brms::prior_string("normal(0, 1)", nlpar = lp, class = "b", coef = "Intercept")
 }))

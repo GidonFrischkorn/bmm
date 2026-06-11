@@ -54,7 +54,7 @@ print(out$brms_formula)
 # ---------------------------------------------------------------------------
 # Priors (same as Unitization)
 # ---------------------------------------------------------------------------
-l_params <- names(out$link_params)
+l_params <- as.character(out$link_params)  # values = l-param names
 priors <- do.call(c, lapply(l_params, function(lp) {
   brms::prior_string("normal(0, 1)", nlpar = lp, class = "b", coef = "Intercept")
 }))
