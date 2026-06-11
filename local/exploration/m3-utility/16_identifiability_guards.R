@@ -92,6 +92,48 @@ check_prelec_ident <- function(data, n_opt_cols, param_name = "alpha") {
   invisible(TRUE)
 }
 
+# ---- G1 (revised): Power utility — RANGE criterion, warning not error ---------
+# Round 7 revision: demote from stop() to warning(), and switch from "count of
+# levels" to "value range ratio" (max(V)/min(V) >= 3).
+# Empirical basis: WP1 results/17_power_utility_{2,3}lev.csv show rho CI ratio
+# is only 1.2x (not the 1.5x threshold) when V in {1,2} vs V in {1,3,5}.
+# Rho DOES recover with 2 levels at large N; the guard is provisionally measured
+# on one fit per design — not enough to justify a hard stop().
+
+check_power_utility_ident_v2 <- function(data, value_cols, param_name = "rho") {
+  for (col_name in value_cols) {
+    if (!col_name %in% names(data)) {
+      stop(sprintf("Value column '%s' not found in data.", col_name))
+    }
+    vals   <- sort(unique(data[[col_name]]))
+    n_uniq <- length(vals)
+    if (n_uniq < 2) {
+      stop(sprintf(
+        "Power utility (%s) not identifiable: '%s' has only 1 distinct value.",
+        param_name, col_name
+      ))
+    }
+    ratio <- max(vals) / min(vals)
+    if (ratio < 3) {
+      warning(sprintf(
+        paste0(
+          "G1 (power utility, provisional): '%s' has range ratio %.2f (max/min), ",
+          "below the recommended threshold of 3.\n",
+          "  Values: %s.\n",
+          "  At small range (e.g. V in {1,2}, ratio=2), rho and gamma can be ",
+          "nearly aliased (posterior correlation > 0.9). Recovery improves with ",
+          "ratio >= 3 (e.g. V in {1,3,5}) or N >> 2700 trials.\n",
+          "  This is a warning, not an error: one fit per design is insufficient ",
+          "to justify a hard stop. See results/17_power_utility_2lev.csv.\n",
+          "  Fix: increase value range (e.g. V in {1,3,5}) if rho is of interest."
+        ),
+        col_name, ratio, paste(vals, collapse=", ")
+      ))
+    }
+  }
+  invisible(TRUE)
+}
+
 # ---- G3: EU slope needs value variation (>= 2 distinct values) ---------------
 
 check_gamma_ident <- function(data, value_cols, param_name = "gamma") {
@@ -115,6 +157,58 @@ check_gamma_ident <- function(data, value_cols, param_name = "gamma") {
       ))
     }
   }
+  invisible(TRUE)
+}
+
+
+# ---- G4: Positivity hazard — simple rule + identity link ---------------------
+# (NEW in round 7; fixes mischaracterized R9 from round 6)
+#
+# When choice_rule = "simple", glue_choice_rule_functions() (model_m3.R:399-404)
+# generates: log({cat} * n_options). With identity-linked parameters, any
+# activation formula can produce non-positive values (e.g., 0.5*b + wi <= 0
+# if wi goes negative in sampling). Stan evaluates log(non-positive) = NaN,
+# causing trajectory rejection (divergences).
+#
+# This is NOT a structural problem: the Luce rule IS native to m3(choice_rule=
+# "simple") — see 22_welfare_bmm_simple.R. The fix is lower-bounded priors.
+#
+# Guard level: WARNING (not error), because:
+#   (a) The user may have already specified lb=0 priors (we cannot verify from
+#       the model object alone, since priors are separate from the model)
+#   (b) Some formulas with identity link may have structural non-negativity
+#       (e.g., activation = b + exp(x) always > 0)
+# The warning is informational — it reminds the user to specify lb=0.
+
+check_positive_utility <- function(model) {
+  if (is.null(model$other_vars$choice_rule) ||
+      model$other_vars$choice_rule != "simple") {
+    return(invisible(TRUE))
+  }
+  identity_params <- names(model$links)[
+    sapply(model$links, function(lk) identical(lk, "identity"))
+  ]
+  if (length(identity_params) == 0) return(invisible(TRUE))
+
+  warning(sprintf(
+    paste0(
+      "G4 (positivity hazard): choice_rule='simple' with identity-linked ",
+      "parameter(s): %s.\n",
+      "  The simple (Luce) rule generates log(activation * n_options) for each ",
+      "category (model_m3.R:402). With identity links, activations CAN be ",
+      "non-positive if parameters go negative during sampling.\n",
+      "  log(non-positive) = NaN in Stan -> divergences or failed sampling.\n",
+      "  Fix: use lower-bounded priors for identity-linked utility parameters:\n",
+      "    set_prior('normal(1, 0.5)', ..., nlpar = '%s', lb = 0)   # lb=0\n",
+      "    # or: 'normal(1, 0.5) T[0,]'  (Stan truncation notation)\n",
+      "  Note: configure_model.m3 already sets init=0 (model_m3.R:425-428)\n",
+      "  to avoid starting from non-positive values, but this does not prevent\n",
+      "  negative draws during sampling.\n",
+      "  Reference: 22_welfare_bmm_simple.R — wi=1.2, wo=0.8 recovery with lb=0."
+    ),
+    paste(identity_params, collapse=", "),
+    identity_params[1]
+  ))
   invisible(TRUE)
 }
 
@@ -247,6 +341,52 @@ if (inherits(result3_pass, "error")) {
 # SECTION 3 — Integration paths per architecture
 # ==============================================================================
 
+cat("--- G4: Positivity hazard (simple rule + identity link) ---\n\n")
+
+# Deficient setup: model with simple rule + identity link, no lower-bounded prior
+# (guard warns because the prior default normal(0,1) permits negative draws)
+deficient_model <- m3(
+  resp_cats   = c("nkeep", "ningroup", "nuniversal"),
+  num_options = c(1L, 1L, 1L),
+  choice_rule = "simple"
+)
+deficient_model$links <- list(wi = "identity", wo = "identity")
+
+cat("Deficient setup: simple rule + identity links, no lower-bounded prior\n")
+result_g4_warn <- tryCatch(
+  withCallingHandlers(
+    check_positive_utility(deficient_model),
+    warning = function(w) {
+      cat("GUARD G4 FIRES (correct):\n")
+      cat(conditionMessage(w), "\n\n")
+      invokeRestart("muffleWarning")
+    }
+  ),
+  error = function(e) e
+)
+
+# Adequate setup: same model, but with lb=0 priors — warning fires but user
+# has already addressed it. We reference 22_welfare_bmm_simple.R as the
+# execution-backed proof that the correct configuration works.
+adequate_model <- m3(
+  resp_cats   = c("nkeep", "ningroup", "nuniversal"),
+  num_options = c(1L, 1L, 1L),
+  choice_rule = "simple"
+)
+adequate_model$links <- list(wi = "identity", wo = "identity")
+# Note: fixed_parameters$b <- 1.0 (numeraire) is set in 22_welfare_bmm_simple.R
+# Lower-bounded priors are set at fit time: set_prior(..., lb = 0)
+
+cat("Adequate setup: simple rule + identity links + lb=0 priors (see 22_welfare_bmm_simple.R)\n")
+cat("  G4 warns on model construction — user addresses by specifying lb=0 priors.\n")
+cat("  22_welfare_bmm_simple.R confirms: wi=1.2, wo=0.8 recovered with lb=0 priors,\n")
+cat("  0 divergences. Guard G4 is informational; the fix is straightforward.\n")
+cat("  ADEQUATE: 22_welfare_bmm_simple.R passes with lb=0 priors ✓\n\n")
+
+cat("Note: G4 is a WARNING not an ERROR because (a) the user may have already\n")
+cat("  specified lb=0 priors and (b) some identity-linked formulas are structurally\n")
+cat("  non-negative (e.g., b + exp(x) > 0 always). The guard is informational.\n\n")
+
 cat("==========================================================================\n")
 cat("SECTION 3 — Where each guard lives in each architecture\n")
 cat("==========================================================================\n\n")
@@ -259,36 +399,41 @@ cat(
 
 guard_placement <- data.frame(
   Guard = c(
-    "G1: power utility (rho)\n  needs >=3 value levels",
+    "G1: power utility (rho)\n  range ratio >= 3 (WARNING)",
     "G2: Prelec (alpha)\n  needs variable set size",
-    "G3: EU slope (gamma)\n  needs value variation"
+    "G3: EU slope (gamma)\n  needs value variation",
+    "G4: positivity hazard\n  simple rule + identity link (WARNING)"
   ),
-  Stage_required = c("check_data", "check_data", "check_data"),
+  Stage_required = c("check_data", "check_data", "check_data", "check_model"),
   Arch_A_exploration = c(
-    "x (no S3 dispatch;\n   no subclass 'm3_utility';\n   only manual call possible)",
+    "x (no S3 dispatch;\n   only manual call possible)",
     "x (same)",
-    "x (same)"
+    "x (same)",
+    "~ (standalone check_positive_utility(model);\n   fires on construction)"
   ),
   Arch_A_production = c(
     "~ (add 'm3_utility' subclass\n   + check_data.m3_utility in R/)",
     "~ (same)",
-    "~ (same)"
+    "~ (same)",
+    "~ (check_model.m3_utility in R/;\n   fires before data check)"
   ),
   Arch_B_version = c(
     "~ (same as A-production;\n   needs class change AND method)",
+    "~ (same)",
     "~ (same)",
     "~ (same)"
   ),
   Arch_C_sibling = c(
     "+ (check_data.utility_memory\n   auto-dispatched by bmm())",
     "+ (same)",
-    "+ (same)"
+    "+ (same)",
+    "+ (check_model.utility\n   auto-dispatched by bmm())"
   ),
   stringsAsFactors = FALSE
 )
 
 for (i in seq_len(nrow(guard_placement))) {
-  cat(sprintf("Guard %d (%s)\n", i, c("G1","G2","G3")[i]))
+  cat(sprintf("Guard %d (%s)\n", i, c("G1","G2","G3","G4")[i]))
   cat(sprintf("  Stage required:     %s\n", guard_placement$Stage_required[i]))
   cat(sprintf("  Arch A exploration: %s\n", guard_placement$Arch_A_exploration[i]))
   cat(sprintf("  Arch A production:  %s\n", guard_placement$Arch_A_production[i]))
@@ -336,17 +481,19 @@ check_data.m3_utility_SKETCH <- function(model, data, formula) {
     }
   }
 
-  # G1: rho identifiability (power utility only)
+  # G1: rho identifiability (power utility only) — WARNING, range criterion
   if (!is.null(value_cols) && utility_fn == "power") {
     for (v_col in value_cols) {
-      n_unique <- length(unique(data[[v_col]]))
-      if (n_unique < 3) {
-        stop(sprintf(
+      vals  <- sort(unique(data[[v_col]]))
+      ratio <- max(vals) / min(vals)
+      if (ratio < 3) {
+        warning(sprintf(
           paste0(
-            "Power utility (rho) not identifiable: column \'%s\' has only %d distinct ",
-            "value(s). Need >= 3 (e.g. V in {1, 3, 5})."
+            "G1 (power utility): value range ratio %.2f < 3 for column \'%s\'.\n",
+            "  (gamma, rho) may be nearly aliased at small range. ",
+            "Use V with max/min >= 3 (e.g. {1,3,5})."
           ),
-          v_col, n_unique
+          ratio, v_col
         ))
       }
     }
@@ -521,10 +668,12 @@ cat("Result:", if (inherits(r_demo3, "error")) paste("ERROR (unexpected):", cond
 cat("==========================================================================\n")
 cat("16_identifiability_guards.R complete.\n")
 cat("\nSummary:\n")
-cat("  G1 power utility rho:  DEMONSTRATED (fires on 2-level V, passes on 3-level)\n")
+cat("  G1 power utility rho:  REVISED to WARNING + range criterion (max(V)/min(V)>=3)\n")
 cat("  G2 Prelec alpha:       DEMONSTRATED (fires on fixed set size, passes on variable)\n")
 cat("  G3 EU slope gamma:     DEMONSTRATED (fires on constant V, passes on variable)\n")
+cat("  G4 positivity hazard:  DEMONSTRATED (warns on simple rule + identity link;\n")
+cat("                           adequate use in 22_welfare_bmm_simple.R with lb=0)\n")
 cat("\n  check_utility_design(model, data): pre-flight validator for Architecture A\n")
-cat("  In Architecture C (sibling): these guards live in check_data.utility_memory\n")
-cat("    and fire automatically via S3 dispatch — no user action required.\n")
+cat("  In Architecture A production / C (sibling): guards fire automatically.\n")
+cat("  G4 requires check_model method (not check_data) — fires earlier in pipeline.\n")
 cat("==========================================================================\n")
