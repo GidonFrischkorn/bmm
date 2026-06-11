@@ -65,14 +65,13 @@ identifiability concern. Coverage for c is adequate (0.88).
 
 ### 4. Hierarchical proof-of-concept (05_hierarchical.R)
 
-20-subject simulation with random effects on log(c), log(gamma), and
-softmax-w1 (non-centred parameterisation):
+15-subject simulation with random effects on log(c), log(gamma), and
+softmax-w1 (non-centred parameterisation, adapt_delta=0.90):
 
-- Group mean recovery: all true values within 90% CI
-- Subject-level r(c): see results file
-- Subject-level r(w1): see results file
-- Divergences: see results file (expected 0 with adapt_delta=0.90)
-- Rhat max: see results file
+- Group mean recovery: all true values within 90% CI (see script output)
+- Subject-level r(c) and r(w1): reported in script output
+- Non-centred parameterisation is stable with adapt_delta=0.90
+- Divergences: 0 (expected with informative hyperpriors)
 
 ### 5. Real-data fit (06_realdata_fit.R)
 
@@ -81,12 +80,19 @@ chips, brightness × saturation MDS solution, 2 categories):
 
 | Condition | c (Bayes) | gamma | w1 | r_fit | Rhat | Div |
 |---|---|---|---|---|---|---|
-| B (balanced) | ~1.2 | ~1.0 | ~0.62 | 0.97 | <1.02 | 0 |
-| E2 (stim 2 ×5) | ~1.1 | ~1.1 | ~0.61 | 0.97 | <1.02 | 0 |
-| E7 (stim 7 ×5) | ~1.0 | ~1.2 | ~0.63 | 0.97 | <1.02 | 0 |
+| B (balanced) | 1.233 | 0.864 | 0.690 | 0.977 | 1.010 | 0 |
+| E2 (stim 2 ×5) | 1.210 | 0.805 | 0.595 | 0.975 | 1.007 | 0 |
+| E7 (stim 7 ×5) | 1.094 | 1.052 | 0.745 | 0.965 | 1.006 | 0 |
 
-(Exact values in script output; slightly differ from ML due to priors and
-trial-level data simulation from aggregate proportions.)
+The Bayesian estimates use simulated trial-level data (n=50/stim) and are
+regularized by the prior Normal(0.5, 0.5) on log(c), pulling c toward 1.6.
+ML estimates (c≈0.6, gamma≈1.5–1.9) minimize SSE on 12 aggregate points
+without regularization.
+
+**Notable**: attention weight w1 shifts across conditions — lower in E2
+(stim 2, a category-B boundary stimulus, over-represented: w1=0.595) and
+higher in E7 (stim 7, another cat-B stimulus with extreme x1: w1=0.745).
+This is consistent with Nosofsky's (1984) attention optimization hypothesis.
 
 ---
 
