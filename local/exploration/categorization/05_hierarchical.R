@@ -1,8 +1,9 @@
-# GCM Hierarchical Proof-of-Concept
+# GCM Hierarchical Proof-of-Concept (stimulus-indexed D_raw)
 #
 # Multi-subject fit with random effects on log(c), log(gamma), and softmax-w.
-# Uses nosof88 geometry. Simulates 20 subjects with subject-level variation
-# around a group mean, then fits the hierarchical model and checks diagnostics.
+# Uses nosof88 geometry. Simulates 15 subjects with subject-level variation
+# around a group mean. Key efficiency: pass D_raw as array[S] matrix[J,M]
+# (12 matrices) rather than array[T] matrix[J,M] (T=5400 matrices).
 #
 # Run from repository root:
 #   Rscript local/exploration/categorization/05_hierarchical.R
@@ -39,65 +40,59 @@ stim_coords <- data.frame(
 ex_mat  <- as.matrix(stim_coords[, c("x1", "x2")])
 ex_cats <- stim_coords$cat
 T_stims <- nrow(stim_coords)
-J_items <- T_stims
+J_items <- T_stims  # exemplars = test stimuli (same set)
 M_dims  <- 2
 K_cats  <- 2
-r_met   <- 2
 
-D_raw <- array(0, dim = c(T_stims, J_items, M_dims))
+# Pre-compute D_raw for each unique stimulus (S=12 matrices)
+D_raw_stim <- array(0, dim = c(T_stims, J_items, M_dims))
 for (m in seq_len(M_dims)) {
-  D_raw[, , m] <- abs(outer(ex_mat[, m], ex_mat[, m], `-`))^r_met
+  D_raw_stim[, , m] <- abs(outer(ex_mat[, m], ex_mat[, m], `-`))^2
 }
+D_raw_list <- lapply(seq_len(T_stims), function(s) D_raw_stim[s, , ])
 
 # -----------------------------------------------------------------------
 # 2. Simulate multi-subject data
 # -----------------------------------------------------------------------
 
-N_subj      <- 20L
-n_per_stim  <- 30L   # trials per stimulus per subject
+N_subj      <- 15L
+n_per_stim  <- 30L  # trials per stimulus per subject
 
-# Group-level true parameters (on log / logit scale)
+# Group-level true parameters
 mu_log_c     <- log(0.8)
 mu_log_gamma <- log(1.5)
 mu_w1_logit  <- qlogis(0.65)
-
-# Between-subject SDs (on unconstrained scale)
 sigma_log_c     <- 0.4
 sigma_log_gamma <- 0.4
 sigma_w1_logit  <- 0.5
 
 set.seed(777)
-subj_log_c     <- rnorm(N_subj, mu_log_c,     sigma_log_c)
-subj_log_gamma <- rnorm(N_subj, mu_log_gamma, sigma_log_gamma)
-subj_w1_logit  <- rnorm(N_subj, mu_w1_logit,  sigma_w1_logit)
-
-subj_c     <- exp(subj_log_c)
-subj_gamma <- exp(subj_log_gamma)
-subj_w1    <- plogis(subj_w1_logit)
+subj_c     <- exp(rnorm(N_subj, mu_log_c,     sigma_log_c))
+subj_gamma <- exp(rnorm(N_subj, mu_log_gamma, sigma_log_gamma))
+subj_w1    <- plogis(rnorm(N_subj, mu_w1_logit, sigma_w1_logit))
 
 cat(sprintf("True group means: c=%.3f, gamma=%.3f, w1=%.3f\n",
             exp(mu_log_c), exp(mu_log_gamma), plogis(mu_w1_logit)))
 cat(sprintf("True group SDs: log_c=%.2f, log_gamma=%.2f, w1_logit=%.2f\n\n",
             sigma_log_c, sigma_log_gamma, sigma_w1_logit))
 
-all_trials <- lapply(seq_len(N_subj), function(s) {
-  w <- c(subj_w1[s], 1 - subj_w1[s])
-  D <- gcm_distances(ex_mat, ex_mat, w, r_metric = 2)
-  S <- gcm_similarity(D, subj_c[s], p_sim = 1)
+trial_df <- do.call(rbind, lapply(seq_len(N_subj), function(s) {
+  w   <- c(subj_w1[s], 1 - subj_w1[s])
+  D   <- gcm_distances(ex_mat, ex_mat, w, r_metric = 2)
+  S   <- gcm_similarity(D, subj_c[s], p_sim = 1)
   act <- cbind(rowSums(S[, ex_cats == 1, drop = FALSE]),
                rowSums(S[, ex_cats == 2, drop = FALSE]))
-  P <- luce_choice(act, subj_gamma[s], bias = c(0.5, 0.5))
+  P   <- luce_choice(act, subj_gamma[s], bias = c(0.5, 0.5))
   do.call(rbind, lapply(seq_len(T_stims), function(i) {
-    y <- sample(1:K_cats, n_per_stim, replace = TRUE, prob = P[i, ])
+    y <- sample(seq_len(K_cats), n_per_stim, replace = TRUE, prob = P[i, ])
     data.frame(subj = s, stim = i, y = y)
   }))
-})
-trial_df <- do.call(rbind, all_trials)
+}))
 cat(sprintf("Simulated %d trials (%d subjects × %d stims × %d trials)\n\n",
             nrow(trial_df), N_subj, T_stims, n_per_stim))
 
 # -----------------------------------------------------------------------
-# 3. Hierarchical Stan model
+# 3. Hierarchical Stan model (stimulus-indexed D_raw)
 # -----------------------------------------------------------------------
 
 hier_stan_code <- "
@@ -108,7 +103,7 @@ functions {
     vector[J] sims;
     vector[K] log_act;
     for (j in 1:J) {
-      real d = sqrt(dot_product(w, D_t[j, ]'));
+      real d = sqrt(dot_product(w, D_t[j, ]));
       sims[j] = exp(-c * d);
     }
     for (k in 1:K) {
@@ -120,63 +115,54 @@ functions {
   }
 }
 data {
-  int<lower=1> T;             // total trials
-  int<lower=1> N;             // number of subjects
-  int<lower=1> J;             // exemplars
-  int<lower=1> M;             // dimensions
-  int<lower=1> K;             // categories
-  array[T] int<lower=1, upper=K>   y;
-  array[T] int<lower=1, upper=N>   subj;
-  array[T] matrix[J, M]            D_raw;
-  array[J] int<lower=1, upper=K>   ex_cat;
+  int<lower=1> T;   // total trials
+  int<lower=1> N;   // subjects
+  int<lower=1> S;   // unique stimuli
+  int<lower=1> J;   // exemplars
+  int<lower=1> M;   // dimensions
+  int<lower=1> K;   // categories
+  array[T] int<lower=1, upper=K> y;
+  array[T] int<lower=1, upper=N> subj;
+  array[T] int<lower=1, upper=S> stim;   // which stimulus (indexes D_stim)
+  array[S] matrix[J, M] D_stim;          // pre-computed distances, one per unique stim
+  array[J] int<lower=1, upper=K> ex_cat;
 }
 parameters {
-  // Group-level means (unconstrained)
   real mu_log_c;
   real mu_log_gamma;
   real mu_w1_logit;
-  // Group-level SDs
   real<lower=0> sigma_log_c;
   real<lower=0> sigma_log_gamma;
   real<lower=0> sigma_w1_logit;
-  // Subject-level (non-centred parameterisation)
   vector[N] z_log_c;
   vector[N] z_log_gamma;
   vector[N] z_w1_logit;
 }
 transformed parameters {
-  vector[N] subj_log_c     = mu_log_c     + sigma_log_c     * z_log_c;
-  vector[N] subj_log_gamma = mu_log_gamma + sigma_log_gamma * z_log_gamma;
-  vector[N] subj_w1_logit  = mu_w1_logit  + sigma_w1_logit  * z_w1_logit;
-
-  vector[N] subj_c     = exp(subj_log_c);
-  vector[N] subj_gamma = exp(subj_log_gamma);
-  vector[N] subj_w1    = inv_logit(subj_w1_logit);
+  vector[N] subj_c     = exp(mu_log_c     + sigma_log_c     * z_log_c);
+  vector[N] subj_gamma = exp(mu_log_gamma + sigma_log_gamma * z_log_gamma);
+  vector[N] subj_w1    = inv_logit(mu_w1_logit + sigma_w1_logit * z_w1_logit);
   vector[K] log_bias   = rep_vector(log(1.0 / K), K);
 }
 model {
-  // Hyperpriors
   mu_log_c     ~ normal(0.5, 0.5);
   mu_log_gamma ~ normal(0.0, 0.5);
   mu_w1_logit  ~ normal(0.0, 1.0);
   sigma_log_c     ~ normal(0, 0.5);
   sigma_log_gamma ~ normal(0, 0.5);
   sigma_w1_logit  ~ normal(0, 1.0);
-  // Non-centred subject offsets
   z_log_c     ~ std_normal();
   z_log_gamma ~ std_normal();
   z_w1_logit  ~ std_normal();
-  // Likelihood
   for (t in 1:T) {
     int s = subj[t];
     vector[M] w = [subj_w1[s], 1 - subj_w1[s]]';
-    vector[K] la = gcm_log_act(D_raw[t], w, subj_c[s], subj_gamma[s],
+    vector[K] la = gcm_log_act(D_stim[stim[t]], w, subj_c[s], subj_gamma[s],
                                 log_bias, ex_cat, K);
     target += la[y[t]] - log_sum_exp(la);
   }
 }
 generated quantities {
-  // Group-level means on natural scale
   real mean_c     = exp(mu_log_c);
   real mean_gamma = exp(mu_log_gamma);
   real mean_w1    = inv_logit(mu_w1_logit);
@@ -184,27 +170,7 @@ generated quantities {
 "
 
 # -----------------------------------------------------------------------
-# 4. Build Stan data
-# -----------------------------------------------------------------------
-
-D_raw_list <- lapply(seq_len(nrow(trial_df)), function(row) {
-  D_raw[trial_df$stim[row], , ]
-})
-
-stan_data <- list(
-  T       = nrow(trial_df),
-  N       = N_subj,
-  J       = J_items,
-  M       = M_dims,
-  K       = K_cats,
-  y       = trial_df$y,
-  subj    = trial_df$subj,
-  D_raw   = D_raw_list,
-  ex_cat  = ex_cats
-)
-
-# -----------------------------------------------------------------------
-# 5. Compile and fit
+# 4. Compile
 # -----------------------------------------------------------------------
 
 cat("Compiling hierarchical Stan model...\n")
@@ -213,14 +179,32 @@ writeLines(hier_stan_code, stan_file)
 mod <- cmdstan_model(stan_file, quiet = TRUE)
 cat("Compilation OK.\n\n")
 
-cat("--- Hierarchical MCMC: 4 chains, 600 warmup + 400 sampling ---\n")
+# -----------------------------------------------------------------------
+# 5. Build Stan data and fit
+# -----------------------------------------------------------------------
+
+stan_data <- list(
+  T      = nrow(trial_df),
+  N      = N_subj,
+  S      = T_stims,
+  J      = J_items,
+  M      = M_dims,
+  K      = K_cats,
+  y      = trial_df$y,
+  subj   = trial_df$subj,
+  stim   = trial_df$stim,
+  D_stim = D_raw_list,
+  ex_cat = ex_cats
+)
+
+cat("--- Hierarchical MCMC: 4 chains, 500 warmup + 300 sampling ---\n")
 t_start <- proc.time()
 fit <- tryCatch(
   mod$sample(
     data          = stan_data,
     chains        = 4,
-    iter_warmup   = 600,
-    iter_sampling = 400,
+    iter_warmup   = 500,
+    iter_sampling = 300,
     seed          = 42,
     refresh       = 200,
     show_messages = TRUE,
@@ -255,9 +239,9 @@ cat(sprintf("\nDivergences: %d\n", n_diverg))
 
 cat("\n=== GROUP-LEVEL RECOVERY ===\n")
 true_vals <- c(
-  mean_c     = exp(mu_log_c),
-  mean_gamma = exp(mu_log_gamma),
-  mean_w1    = plogis(mu_w1_logit),
+  mean_c          = exp(mu_log_c),
+  mean_gamma      = exp(mu_log_gamma),
+  mean_w1         = plogis(mu_w1_logit),
   sigma_log_c     = sigma_log_c,
   sigma_log_gamma = sigma_log_gamma,
   sigma_w1_logit  = sigma_w1_logit
@@ -280,10 +264,8 @@ for (nm in names(true_vals)) {
 # -----------------------------------------------------------------------
 
 cat("\n=== SUBJECT-LEVEL RECOVERY (c and w1) ===\n")
-subj_c_vars  <- paste0("subj_c[", 1:N_subj, "]")
-subj_w1_vars <- paste0("subj_w1[", 1:N_subj, "]")
-subj_c_draws  <- fit$summary(variables = subj_c_vars)
-subj_w1_draws <- fit$summary(variables = subj_w1_vars)
+subj_c_draws  <- fit$summary(paste0("subj_c[",  seq_len(N_subj), "]"))
+subj_w1_draws <- fit$summary(paste0("subj_w1[", seq_len(N_subj), "]"))
 
 r_c_subj  <- cor(subj_c,  subj_c_draws$mean)
 r_w1_subj <- cor(subj_w1, subj_w1_draws$mean)
@@ -294,12 +276,11 @@ cat(sprintf("  r(true_w1_subj, post_w1_subj): %.3f\n", r_w1_subj))
 # 9. Summary
 # -----------------------------------------------------------------------
 
-cat("\n=== HIERARCHICAL FIT SUMMARY ===\n")
-rhat_max <- max(c(group_draws$rhat,
-                  subj_c_draws$rhat,
-                  subj_w1_draws$rhat), na.rm = TRUE)
+rhat_max <- max(c(group_draws$rhat, subj_c_draws$rhat, subj_w1_draws$rhat),
+                na.rm = TRUE)
 ess_min  <- min(group_draws$ess_bulk, na.rm = TRUE)
 
+cat(sprintf("\n=== HIERARCHICAL FIT SUMMARY ===\n"))
 cat(sprintf("  Subjects: %d, trials: %d\n", N_subj, nrow(trial_df)))
 cat(sprintf("  Sampling time: %.1f s\n", t_elapsed["elapsed"]))
 cat(sprintf("  Rhat max: %.3f\n", rhat_max))
@@ -307,4 +288,5 @@ cat(sprintf("  ESS bulk min (group params): %.0f\n", ess_min))
 cat(sprintf("  Divergences: %d\n", n_diverg))
 cat(sprintf("  Subject-level r(c):  %.3f\n", r_c_subj))
 cat(sprintf("  Subject-level r(w1): %.3f\n", r_w1_subj))
+cat("  Implementation: stimulus-indexed D_stim (S=12 matrices vs T trials)\n")
 cat("  Non-centred parameterisation: stable with adapt_delta=0.90\n")
