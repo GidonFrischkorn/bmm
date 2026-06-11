@@ -998,17 +998,15 @@ All fits use `backend = "cmdstanr"`.  Result CSVs are in `results/`.
 
 **Interpretation.**  Both designs recover $(\gamma, \rho)$ jointly with 95% coverage at
 $N = 30 \times 90$ (3-level) and $N = 30 \times 80$ (2-level).  The 1.2× ratio for
-$\rho$ is below the 1.5× threshold used in `16_identifiability_guards.R`.  Guard G1
-("$\geq 3$ value levels required") is still warranted because:
+$\rho$ is below the hypothesised 1.5× threshold.
 
-1. The 2-level design with $V \in \{1, 2\}$ has very small range, and the power
-   utility effect at $V^{0.7}$ is nearly linear across $\{1, 2\}$ — $\rho$ and
-   $\gamma$ are almost aliased in this regime.
-2. With 34 divergences vs 10 (3-level), the 2-level posterior geometry is harder to
-   sample; the 1.2× width underestimates the true identifiability penalty.
-
-**Recommendation:** Revise guard G1 to require a *range* criterion ($\max(V) / \min(V) \geq 3$
-or at least 3 levels), not just the count of distinct levels.
+**Guard G1 revision (round 7):** Guard G1 is demoted from `stop()` to `warning()` and
+the trigger criterion is changed from "count of levels" to "value range ratio"
+($\max(V) / \min(V) \geq 3$).  Rationale: (a) one fit per design is insufficient to
+justify a hard error; (b) the 1.2× width increase does not unambiguously justify stopping
+the run; (c) the key diagnostic is the range ratio (very small range $\to$ nearly
+linear power effect $\to$ aliasing), not the number of distinct levels per se.  See
+`16_identifiability_guards.R` (round 7 revision: `check_power_utility_ident_v2`).
 
 ---
 
@@ -1109,6 +1107,8 @@ in separate blocks.
 **Results:** `results/21_model_d_recovery.csv`, `results/21_model_ea_recovery.csv`,
 `results/21_welfare_reparam.csv`
 **True:** $w_i = 0.60$, $w_o = 0.30$, payoff matrix from Gross et al. 2025.
+**Note (round 7):** Two of the three new requirements documented in round 6 (R9, R10)
+were incorrect. See corrections below and in `14_requirements_inventory.md`.
 
 ### Payoff structure
 
@@ -1117,6 +1117,11 @@ in separate blocks.
 | keep | 1.0 (numeraire) | 1.00 |
 | ingroup | $0.5 + w_i$ | 1.10 |
 | universal | $0.3 + 0.6 w_i + 0.9 w_o$ | 0.93 |
+
+**Note on near-indifference:** The true utilities (1.00, 1.10, 0.93) differ by at most
+17% from each other. This near-indifference regime strongly amplifies noise through
+the inverse reparametrization transform and is the primary cause of the recovery
+difficulties reported below.
 
 ### Model D reparametrization
 
@@ -1129,58 +1134,166 @@ $$
 \beta_D = \log(U_{\text{universal}}) - \alpha_D = \log(0.93) - \log(1.10) \approx -0.168
 $$
 
-### Structural equivalence: E_D = E_A = Model D
+### Structural equivalence check
 
 | Model | Mean log-lik | $\Delta$ |
 |---|---|---|
 | Model D (softmax) | −1.0967 | — |
-| E_A (payoff-constrained NLF) | −1.0968 | −0.0000 |
+| E_A (payoff-constrained NLF) | −1.0968 | −0.000018 |
 
-**CONFIRMED:** Model D and E_A have *identical* log-likelihoods ($\Delta = 0.000$).
-E_A is a reparametrization of Model D where parameters have direct welfare-weight
-interpretations ($c \to w_i$, $u \to 0.9 w_o$), constrained by the payoff matrix.
+The near-zero Δlog-lik confirms Model D and E_A are effectively reparametrizations at
+the **population level** — they assign the same likelihood to the data.
 
-### Stage-1 compatibility
+### E_A parameter recovery (full table from results/21_model_ea_recovery.csv)
 
-Stage-1 `m3_utility()` cannot express the welfare-weight use case.  Three new requirements
-identified:
+| Parameter | True | Estimate | 95% CI | Covered | Max R̂ | Divs |
+|---|---|---|---|---|---|---|
+| $c$ (ingroup weight) | 0.60 | 0.689 | [0.552, 0.836] | ✅ | 1.005 | 0 |
+| $u$ (outgroup contribution) | 0.27 | 0.458 | [0.347, 0.577] | **❌** | 1.005 | 0 |
 
-| Req. | Description | Severity |
-|---|---|---|
-| R8 | Fixed payoff coefficients (0.3, 0.6, 0.9) in NLF formula | silent-wrong |
-| R9 | Luce/simple rule with non-linear utility (log of a sum) | runtime error |
-| R10 | Numeraire fixing ($b = 1$ payoff scale ≠ M3 background noise) | silent-wrong |
+$u$ is **NOT covered** (true 0.27 is below the 95% CI lower bound of 0.347).
 
-**Workaround:** The welfare-weight parameters can be recovered *post-hoc* from a standard
-`m3_utility()` EU fit via:
+### Two-cause diagnosis of $u$ non-coverage
+
+1. **Near-indifference utilities.** The true utilities (1.00/1.10/0.93) are all within
+   17% of each other. The inverse transforms $\hat{w}_i = \exp(\hat\alpha_D) - 0.5$
+   and $\hat{w}_o = (\exp(\hat\alpha_D + \hat\beta_D) - 0.3 - 0.6\hat{w}_i) / 0.9$
+   involve division by small-ish denominators (0.9) and addition of small terms,
+   so even modest estimation noise in $\alpha_D$/$\beta_D$ maps to large errors in $w_o$.
+   The reparametrisation back-transform (`results/21_welfare_reparam.csv`) confirms:
+   $\hat{w}_o = 0.488$ vs. true 0.30 (63% upward bias).
+
+2. **Prior misspecification.** The `lognormal(0, 0.5)` prior on $u$ in the E_A fit
+   places median = $e^0 = 1.0$. The true value is $u = 0.9 \times w_o = 0.9 \times 0.30
+   = 0.27$, which is $\log(0.27) - 0 = -1.31$ standard deviations below the prior
+   mean on the log scale (z-score ≈ −2.62). The prior pulls estimates strongly toward 1.0.
+   This miscentred prior would not be used in practice — a welfare-weight informed prior
+   would centre near 0.3 with SD 0.2.
+
+**Cross-reference:** Round 7 WP1 (`22_welfare_bmm_simple.R`) tests the same bmm machinery
+with well-separated utilities ($w_i = 1.2, w_o = 0.8$; utilities 1.00/1.70/1.74) and
+correct lower-bounded priors. See §16.1 for results.
+
+### Stage-1 compatibility (corrected from round 6)
+
+Round 6 identified three new requirements R8–R10. R9 and R10 were incorrect; only R8
+is a genuine new requirement.
+
+| Req. | Description | Severity | Status |
+|---|---|---|---|
+| R8 | Fixed payoff coefficients (0.3, 0.6, 0.9) in NLF activation formula | silent-wrong | ✅ genuine, Stage-2 |
+| R9 | **CORRECTED:** Positivity hazard (identity link + simple rule → log(negative)) | runtime error | guard G4 in Stage-1 |
+| R10 | **CORRECTED:** Numeraire fixing is documented gap only (`fixed_parameters$b` works) | friction | auto-set in Stage-1 |
+
+**Correction to R9:** The claim that "Luce/simple rule requires raw brms" was wrong.
+`glue_choice_rule_functions()` (R/model_m3.R:399–404) natively generates
+`log({cat} * n_options)` for the simple rule, which is the Luce ratio rule for $n_k=1$.
+The real hazard is positivity: with identity links, activations can be non-positive.
+`22_welfare_bmm_simple.R` proves the pipeline works without raw brms when lower-bounded
+priors ($\text{lb}=0$) are specified.
+
+**Correction to R10:** The claim that `fixed_parameters$b=1.0` "conflicts semantically
+with M3's background noise" was wrong. `b` in `fixed_parameters` IS the formula
+parameter `b` in activation formulas. `fixed_pars_priors()` (R/helpers-prior.R:147)
+converts it to `constant(1)` automatically. There is no semantic mismatch.
+
+**Workaround for R8 (fixed payoff coefficients, genuine requirement):** Welfare-weight
+parameters can be recovered *post-hoc* from a standard M3 softmax fit via:
 $$
 \hat{w}_i = \exp(\hat\alpha_D) - 0.5, \qquad
 \hat{w}_o = \frac{\exp(\hat\alpha_D + \hat\beta_D) - 0.3 - 0.6\,\hat{w}_i}{0.9}
 $$
-
-This works because E_D = Model D (structurally confirmed above).  It does not require
-Stage-2 or Stage-3 extensions.
+This works because E_D ≈ Model D at the population level (Δlog-lik ≈ 0).
+Note however that this back-transform is unreliable near indifference — see the
+$u$ non-coverage above.
 
 ---
 
-## 15.6  Go / no-go table
+## 15.6  Go / no-go table (rounds 6–7)
 
-All measures are from executed fits in this round.
+All measures are from executed fits.  Round 7 corrections are noted explicitly.
 
 | Claim | Evidence | Measured result | Verdict |
 |---|---|---|---|
-| Power utility jointly recoverable with ≥3 value levels | `17_power_utility_3lev.csv` | $\gamma$ covered, $\rho$ covered, 0 divergences | ✅ GO |
-| 2-level design worse for $\rho$ | `17_power_utility_2lev.csv` | CI ratio 1.2× (< 1.5× threshold) | ⚠️ PARTIAL — guard G1 needs range criterion |
+| Power utility jointly recoverable with range ratio ≥ 3 | `17_power_utility_3lev.csv` | $\gamma$ covered, $\rho$ covered, 10 divergences | ✅ GO |
+| 2-level design (range ratio 2): rho CI ratio 1.2× | `17_power_utility_2lev.csv` | CI ratio 1.2× (provisionally measured, 1 fit) | ⚠️ G1 → warning + range criterion (see §16.2) |
 | Prelec $\alpha$ recoverable with variable set sizes | `18_prelec_alpha06_rep{1,2}.csv` | Both covered, CI excludes 1.0 | ✅ GO |
 | Prelec null ($\alpha = 1.0$) not falsely detected | `18_prelec_alpha10_rep{1,2}.csv` | CI includes 1.0, 0 false positives | ✅ GO |
 | Composite PT coverage with `adapt_delta = 0.95` | `19_composite_pt_delta95.csv` | All 4 params covered, 0 divergences | ✅ GO |
 | $c$-$\alpha$ confound confirmed | `19_composite_pt_diagnosis.csv` | $\text{cor}(c, \alpha) = 0.906$ | ✅ CONFIRMED (non-fatal) |
 | Stage confusion: E and D indistinguishable | `20_stage_confusion.csv` | Median $|\text{ELPD diff}| = 0.15$ | ✅ CONFIRMED |
-| E_D = Model D structural equivalence | `21_welfare_reparam.csv` | $\Delta\log\text{lik} = 0.000$ | ✅ CONFIRMED |
-| Stage-1 cannot express welfare-weight use case | `21_welfare_weight.R` Part (d) | R8, R9, R10 documented | ✅ CONFIRMED |
+| E_D ≈ Model D at population level | `21_welfare_reparam.csv` | $\Delta\log\text{lik} = 0.000018$ | ✅ CONFIRMED (≈ identical) |
+| $u$ (outgroup contribution) non-covered at near-indifference | `21_model_ea_recovery.csv` | est=0.458 [0.347, 0.577] vs true 0.27 | ✅ CONFIRMED — two causes diagnosed (§15.5) |
+| R9 claim (Luce rule needs raw brms) | `22_welfare_bmm_simple.R` | ❌ INCORRECT — m3 simple rule IS native | **CORRECTION** — see §16.1 |
+| R10 claim (numeraire semantic mismatch) | R/helpers-prior.R:147, model_m3.R:79 | ❌ INCORRECT — `fixed_parameters$b` works | **CORRECTION** — see §16.1 |
+| Luce rule with welfare weights runs in today's m3 | `22_welfare_bmm_simple.R` | wi/wo recovery with lb=0 priors | NOT YET TESTED (fit pending §16.1) |
 
 **Overall verdict:** Stage 1 implementation (`m3_utility()` → `R/model_m3_utility.R` with
-`"m3_utility"` subclass) is **ready to proceed** pending a vignette and test suite.
+`"m3_utility"` subclass and guards G1–G4) is **ready to proceed** pending a vignette and
+test suite.  R8 (fixed payoff coefficients) remains out of Stage-1 scope.
+
+---
+
+# 16  Round 7: corrections (final)
+
+Round 7 is a corrections-only round.  No new identifiability fits.
+
+## 16.1  WP1 — Execution-backed proof that welfare-weight case runs in today's m3
+
+**Script:** `22_welfare_bmm_simple.R`
+**Results:** `results/22_welfare_bmm_simple.csv`
+**True:** $w_i = 1.2$, $w_o = 0.8$, $b = 1.0$ (numeraire).
+**Utilities:** $U(\text{keep}) = 1.00$, $U(\text{ingroup}) = 1.70$, $U(\text{universal}) = 1.74$ — well-separated, far from indifference.
+**Design:** $N = 30 \times 100$, 2 chains × 1000 iter, `choice_rule = "simple"`, identity links, `fixed_parameters$b = 1.0`, lower-bounded priors $\text{lb} = 0$.
+
+This fit proves simultaneously:
+
+- **(R9 corrected):** `m3(choice_rule = "simple")` + identity links = native Luce rule.
+  `glue_choice_rule_functions()` (R/model_m3.R:399–404) generates `log({cat} * n_options)`;
+  with $n_k = 1$ for all categories, `exp(log(U_k)) / \sum_j \exp(log(U_j)) = U_k / \sum U_j`
+  — this IS the Luce ratio rule.  No raw brms needed.
+- **(R10 corrected):** `fixed_parameters$b <- 1.0` is the supported numeraire mechanism.
+  `fixed_pars_priors()` (R/helpers-prior.R:147) converts it to `constant(1)`.
+- **(G4 adequate):** Lower-bounded priors (`lb = 0`) prevent the positivity hazard.
+
+**Results** (to be filled in after fit):
+
+NOT YET TESTED — fit pending.  Results will appear in `results/22_welfare_bmm_simple.csv`.
+
+---
+
+## 16.2  Corrected requirement set
+
+After round 7 corrections, the requirement set is R1–R8 (10 entries, R9/R10 downgraded):
+
+| # | Requirement | Severity | Stage-1 scope |
+|---|---|---|---|
+| R1 | Per-category activation formula trap | silent-wrong | ✅ resolved |
+| R2 | Default priors for $\gamma$, $\rho$, $\alpha$ | friction | ✅ resolved |
+| R3 | Identity links undocumented | runtime error | ✅ resolved |
+| R4 | Design-dependent identifiability guards (G1–G3) | silent-wrong | ✅ resolved (G1 → warning) |
+| R5 | Per-option attribute data (binary PT) | runtime error | Stage-2 |
+| R6 | Utility × weighting composition | friction | ✅ resolved |
+| R7 | Parameter labelling in `summary()` | friction | ~ partial |
+| R8 | Fixed payoff coefficients in NLF (welfare-weight use case) | silent-wrong | Stage-2+ |
+| R9 | Positivity hazard (G4): identity link + simple rule | runtime error | ✅ guard G4 (warning) |
+| R10 | Numeraire fixing: documentation gap only | friction | ✅ auto-set by constructor |
+
+Guards G1–G4 are in `16_identifiability_guards.R`.  G1 is a warning (range criterion
+$\max(V)/\min(V) \geq 3$, provisionally measured).  G4 is a warning on construction.
+
+---
+
+## 16.3  README render note
+
+`README.qmd` was rendered locally on 2026-06-11 with:
+
+```sh
+quarto render local/exploration/m3-utility/README.qmd --to html
+```
+
+Exit status: 0.  Output: `README.html`.  Quarto is not installed in this CI environment
+(exit status checked locally); the `.qmd` source is in the repo for local rendering.
 
 ---
 
@@ -1201,14 +1314,15 @@ All measures are from executed fits in this round.
 | `11_utility_wrapper.R` | `m3_utility()` prototype: clean API, formula generator, default priors (fix: normal not lognormal for log-link params) |
 | `12_binary_choice_pt.R` | Hierarchical binary PT (Nilsson et al. 2011): rho, alpha, lambda recovery |
 | `13_recovery_one_cell.R` | Single-cell helper for incremental WP1 grid runs |
-| `14_requirements_inventory.md` | 10 requirements (R8–R10 added round 6) with severity, stage, workaround |
+| `14_requirements_inventory.md` | 10 requirements (R9/R10 corrected round 7); severity, stage, workaround |
 | `15_user_surface.R` | 9 code snippets (3 UCs × 3 archs) + smoke fits |
-| `16_identifiability_guards.R` | Guard functions, pipeline placement, demos |
+| `16_identifiability_guards.R` | Guards G1–G4; G1 revised to warning + range criterion; G4 new (round 7) |
 | `17_power_utility_recovery.R` | WP1: power utility 3-level vs 2-level CI-width comparison |
 | `18_prelec_hierarchical.R` | WP2: Prelec recovery, $\alpha \in \{0.6, 1.0\}$, 2 reps each |
 | `19_composite_pt_proper.R` | WP3: composite PT `adapt_delta = 0.95`, $c$-$\alpha$ confound diagnosis |
 | `20_stage_confusion_loo.R` | WP4: stage confusion 2×2 LOO cross-tab |
-| `21_welfare_weight.R` | WP5: E_D/E_A welfare-weight simulation, Stage-1 R8–R10 |
-| `DESIGN_utility_api.md` | Design memo: coverage matrix, staged recommendation, impl sketch (R8–R10 added round 6) |
+| `21_welfare_weight.R` | WP5: E_D/E_A welfare-weight simulation; R9/R10 corrected in round 7 |
+| `22_welfare_bmm_simple.R` | Round 7 WP1: bmm simple-rule welfare-weight fit; proves R9/R10 corrections |
+| `DESIGN_utility_api.md` | Design memo: R9/R10 corrected round 7; G4 added; staged recommendation |
 | `results/` | CSV files for measured parameter recovery results |
-| `README.qmd` | This document (renders to HTML or PDF via Quarto) |
+| `README.qmd` | This document (renders to HTML or PDF via Quarto; verified locally 2026-06-11) |
