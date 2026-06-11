@@ -1,0 +1,5 @@
+"param","true","estimate","q2.5","q97.5","covered","note"
+"alpha",0.8,0.8826461394,0.73893527875,1.04219374,TRUE,""
+"gammaw",0.65,0.7435614351,0.55556699525,0.97435170925,TRUE,""
+"phi",1.2,0.95461550608,0.534733639,1.521144885,TRUE,""
+"lambda",2.25,NA,NA,NA,NA,"lambda not identified in gains-only design"
