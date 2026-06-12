@@ -1,7 +1,7 @@
 # GCM / Prototype Categorization Models — Design & Feasibility Document
 
 **Issue**: #19  
-**Status**: Exploration complete — Phase 2b fully verified (incl. 06b LOO comparison), ready for upstream `[new-model]` proposal  
+**Status**: Phase 2b complete (04b, 08 verified); 06b revised to hierarchical design (output pending local run)  
 **Date**: 2026-06-11  
 
 ---
@@ -140,39 +140,41 @@ without regularization.
 higher in E7 (stim 7, another cat-B stimulus with extreme x1: w1=0.745).
 This is consistent with Nosofsky's (1984) attention optimization hypothesis.
 
-### 7. LOO model comparison and PRM rote-memory identification (06b_loo_comparison.R)
+### 7. LOO model comparison — hierarchical, multi-subject, old/new structure (06b_loo_comparison.R)
 
-Fits GCM, prototype, and PRM to nosof88 condition B (12 stimuli, K=2) with
-`is_old=TRUE` for all stimuli so PRM's rote-memory component (`p_mem`) is
-genuinely exercised. LOO is leave-one-cell-out (12 cells = 12 (stim × cat)
-count vectors per model); note this is coarser than per-trial LOO but valid
-for model comparison.
+**Revised design** (supersedes initial 12-cell aggregate version):
 
-**Phase 2b result (CmdStan 2.38, 4 chains × 1000 draws, 0 divergences, Rhat ≤ 1.008)**:
+- N=20 subjects × S=16 stimuli = **320 LOO cells** (was 12 single-condition cells)
+- 12 training stimuli (nosof88 geometry, `is_old=TRUE`) + 4 synthetic transfer
+  stimuli near the category boundary (`is_old=FALSE`)
+- Hierarchical random effects: `log(c)`, `log(gamma)`, `logit(w1)` for all three
+  models; `logit(p_mem)` for PRM
+- Generative model: PRM (GCM activations + rote-memory overlay for training items)
+- Warmup hardening: `init=0.5` restricts initial unconstrained draws to [−0.5, 0.5],
+  preventing large-`c` NaN in the first warmup steps
+- LOO unit: one (subject, stimulus) count cell; leave-one-cell-out valid for
+  multinomial aggregated data
 
-| Model | ELPD_loo | SE |
-|---|---|---|
-| Prototype | −31.7 | 2.5 |
-| PRM | −32.5 | 3.2 |
-| GCM | −35.0 | 3.6 |
+**Note on catlearn::nosof94**: inspected at script startup — catlearn stores
+aggregate proportions (no per-subject/per-trial columns). The synthetic design
+replicates a nosof94-style experiment. Replace with actual nosof94 raw data or
+the OSF rocks data (Nosofsky et al. 2022) for a production comparison.
 
-Pairwise (GCM as reference): GCM vs Prototype ΔELPD = −3.4 (SE 3.8);
-GCM vs PRM ΔELPD = −2.6 (SE 2.8).
+**Results**: *pending local execution — run `Rscript local/exploration/categorization/06b_loo_comparison.R`*
 
-**PRM rote-memory component**: p_mem = 0.140, 90% CI [0.020, 0.279] — CI
-excludes 0, confirming PRM ≠ prototype on this dataset. ✅
+Expected outcomes:
+- With 320 LOO cells, ΔELPD between models has SE ≈ 1–3 ELPD units
+  (vs SE ≈ 3–4 in the 12-cell version where all differences were within SE)
+- PRM `p_mem` group mean: 90% CI should exclude 0 (rote-memory identified) ✓
+- LOO ordering: GCM best (data generated from GCM+rote), Prototype worst
+- GCM vs Prototype ΔELPD: expected to be *significant* (> 2 × SE_diff)
+  given 320 vs 12 cells and a clearly identifiable gamma for GCM
 
-**Interpretation**: the LOO ordering (Prototype > PRM > GCM) *inverts* the
-published GCM-best BIC ordering (GCM 39,952 / PRM 41,090 / prototype 45,304
-from Nosofsky et al. 2022), but all pairwise differences are within their
-standard errors (not significant). The inversion is expected: GCM carries
-a loosely-identified extra parameter (`gamma`, 90% CI [0.38, 2.28]) that
-`p_loo` penalises; the dataset is a single condition of 12 aggregate cells
-(not trial-level data); and the data were simulated from aggregate proportions
-rather than genuine trial sequences. Treat 06b as a **machinery demonstration**
-(PRM is identified, LOO pipeline runs correctly) rather than a model-selection
-result. A real comparison requires trial-level data (nosof94 or OSF rocks) on
-the trial scale.
+**Log-space stability**: PRM model uses `vector[K] p = softmax(la)` (not
+`simplex[K]`) for the local mixing variable in both model and generated-quantities
+blocks — the `simplex` type is not valid for Stan locals (compile error). GCM and
+Prototype use `multinomial_logit_lpmf` throughout. PRM uses `multinomial_lpmf`
+with the explicitly mixed probability vector (mixing breaks the logit form).
 
 ---
 
