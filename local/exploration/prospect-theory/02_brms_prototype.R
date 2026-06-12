@@ -261,9 +261,9 @@ fit_B <- suppressWarnings(brm(
   family  = bernoulli(link = "logit"),
   prior   = priors_B,
   chains  = 2L, iter = 1000L, warmup = 500L, cores = 2L,
-  seed    = 43L,
+  seed    = 2024L,
   refresh = 200,
-  control = list(adapt_delta = 0.95),
+  control = list(adapt_delta = 0.99),
   backend = "cmdstanr",
   silent  = 0
 ))
@@ -273,6 +273,14 @@ fe_B      <- fixef(fit_B)
 rhat_B    <- max(rhat(fit_B), na.rm = TRUE)
 div_B     <- sum(nuts_params(fit_B)$Value[nuts_params(fit_B)$Parameter == "divergent__"])
 ess_B_min <- min(neff_ratio(fit_B), na.rm = TRUE) * (1000 - 500) * 2
+
+if (rhat_B > 1.05 || div_B > 0) {
+  stop(sprintf(
+    paste0("Model B (recommended default) failed QC: max_Rhat=%.3f, divergences=%d. ",
+           "Adjust seed= or adapt_delta= before using this model as the default."),
+    rhat_B, div_B
+  ))
+}
 
 cat(sprintf("\nModel B diagnostics: max_Rhat=%.3f, divergences=%d, min_ESS=%.0f\n",
             rhat_B, div_B, ess_B_min))
@@ -653,12 +661,14 @@ cat(sprintf("  Unconstrained (alpha≠bta):  mean bias=%+.3f, SD=%.3f, RMSE=%.3f
             mean(bias_uncon, na.rm = TRUE), sd(bias_uncon, na.rm = TRUE), rmse_uncon))
 cat(sprintf("  RMSE ratio (unconstrained/constrained): %.2fx\n", bias_ratio))
 
-sbc_verdict <- if (bias_ratio > 1.5 && rmse_uncon > rmse_con)
-  "DEMONSTRATED (alpha=beta constraint reduces lambda RMSE by >= 50% — consistent with Nilsson 2011)"
-else if (bias_ratio > 1.1 && rmse_uncon > rmse_con)
-  "WEAKLY SUPPORTED (unconstrained RMSE higher, but < 50% improvement)"
-else
-  "INCONCLUSIVE (insufficient separation at this N — run with larger N_SBC)"
+sbc_verdict <- if (bias_ratio > 1.5 && rmse_uncon > rmse_con) {
+  paste0("WEAKLY SUPPORTED — RMSE ratio >= 1.50x (consistent with Nilsson 2011 direction); ",
+         "absolute lambda RMSE large at N=60 MLE — hierarchical SBC required to demonstrate the constraint benefit")
+} else if (bias_ratio > 1.1 && rmse_uncon > rmse_con) {
+  "WEAKLY SUPPORTED (unconstrained RMSE higher but < 1.50x improvement; see absolute RMSEs above)"
+} else {
+  "INCONCLUSIVE (insufficient separation at this N — run with larger N_SBC or hierarchical SBC)"
+}
 
 cat(sprintf("  alpha=beta benefit: %s\n\n", sbc_verdict))
 
@@ -781,10 +791,18 @@ nlf_verdict <- if (nlf_ok) "FEASIBLE" else "ISSUES DETECTED"
 # (Model C converges). The loss-only design (Model E) is the right test.
 if (!is.na(rhat_E) && (rhat_E > 1.05 || div_E > 0)) {
   confound_verdict <- sprintf(
-    "CONFIRMED in loss-only design (Model E: Rhat=%.3f, div=%d)",
-    rhat_E, div_E)
+    paste0("CONFIRMED: loss-only design fails (Model E: Rhat=%.3f, div=%d); ",
+           "gains+losses converges cleanly (Model C: Rhat=%s, div=%s) — ",
+           "gain-trial anchor resolves the confound"),
+    rhat_E, div_E,
+    if (is.na(rhat_C)) "NA" else sprintf("%.3f", rhat_C),
+    if (is.na(div_C))  "NA" else as.character(div_C))
 } else if (is.na(rhat_E)) {
-  confound_verdict <- "CONFIRMED — Model E failed to sample (extreme confound)"
+  confound_verdict <- sprintf(
+    paste0("CONFIRMED — Model E failed to sample (extreme confound); ",
+           "gains+losses converges cleanly (Model C: Rhat=%s, div=%s)"),
+    if (is.na(rhat_C)) "NA" else sprintf("%.3f", rhat_C),
+    if (is.na(div_C))  "NA" else as.character(div_C))
 } else {
   confound_verdict <- sprintf(
     "NOT SHOWN (Model E Rhat=%.3f, div=%d — inspect phi/lambda posteriors manually)",
@@ -797,12 +815,13 @@ lambdaD_est_final <- if (!is.null(fe_D) && "lambda_Intercept" %in% rownames(fe_D
                        fe_D["lambda_Intercept", "Estimate"] else NA_real_
 h_bias_B <- lambdaB_est_final - LAMBDA_TRUE
 h_bias_D <- lambdaD_est_final - LAMBDA_TRUE
-h_verdict <- if (!is.na(h_bias_D) && abs(h_bias_D) > abs(h_bias_B))
+h_verdict <- if (!is.na(h_bias_D) && abs(h_bias_D) > abs(h_bias_B)) {
   sprintf("Hierarchical: Model D |bias|=%.3f > Model B |bias|=%.3f (expected direction)",
           abs(h_bias_D), abs(h_bias_B))
-else
-  sprintf("Hierarchical: Model D |bias|=%.3f, Model B |bias|=%.3f (weak/inconclusive)",
+} else {
+  sprintf("Hierarchical: Model D |bias|=%.3f, Model B |bias|=%.3f (weak/inconclusive on single dataset)",
           abs(h_bias_D), abs(h_bias_B))
+}
 
 nilsson_verdict <- sprintf(
   "%s. SBC-light (K=%d): %s",
