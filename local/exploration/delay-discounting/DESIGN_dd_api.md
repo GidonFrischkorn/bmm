@@ -134,17 +134,14 @@ The data layout is identical. The **valuation function** differs:
 | Prospect theory | w(p)·v(x)            | α, γ (Prelec+PT) |
 
 **Verdict: the data interface _can_ be shared — column naming locked as
-canonical in this PR; base-class API pending the attribute-choice addendum issue.**
+canonical; base-class API signed off in #27 (attribute-based-choice interface
+contract). Shared-constructor criterion ✓.**
 
-The column-naming convention established here (`amt_A/delay_A`, `amt_B/delay_B`)
-is adopted as canonical. #24 (prospect theory) will drop `x_A/p_A` in favour
-of `amt_A/prob_A` once @GidonFrischkorn opens the attribute-based-choice
-interface addendum issue, which both DESIGN memos will reference. `attr_choice()`
-(not user-facing) is the agreed internal base class.
-
-Until the addendum issue is opened and #24 is updated, Option A in §3.3
-should be read as a _design direction_; the base-class API is not yet
-signed off across both explorations.
+The column-naming convention (`amt_A/delay_A`, `amt_B/delay_B`) is canonical.
+#24 (prospect theory) has adopted `amt_A/prob_A` (dropped `x_A/p_A`), and
+`attr_choice()` (not user-facing) is the agreed internal base class — both
+confirmed via #27. Option A in §3.3 is the agreed approach, not merely a design
+direction.
 
 ### 3.2 Choice rule asymmetry
 
@@ -186,7 +183,9 @@ pt_choice(
 
 Both constructors share an underlying `attr_choice()` base class
 (not user-facing) that handles the per-option attribute validation and
-the common check_data() logic (G1, G2).
+the common check_data() logic (G1, G2). Production realization: #28 implements
+`attr_choice` as sign-agnostic (so `pt_choice` can inherit it), with the
+positive-amount check living in `check_data.dd_choice`.
 
 **Pros:** explicit API, no shared-function confusion, easy to extend;
 aligns with bmm's "one constructor = one response format" principle.
@@ -269,5 +268,5 @@ From the issue:
 | Validated R reference likelihood, recovering known parameters across all four discount functions | ✓ | 01_reference_implementation.R: all |bias_logk| < 0.5; s/beta now reported; qh p(LL) fixed to 0.44 |
 | brms/Stan prototype fitting a small hierarchical dataset, with diagnostics reported | ✓ | 02_brms_prototype.R: R-hat=1.018, r=0.995 |
 | Identifiability guards demonstrated (delay-range guard; k-vs-sensitivity confound) | ✓ | 03_identifiability_guards.R: G1 ✓, G2 screen folded into G1 (fires iff G1 fires; value = φ-prior default), G3 ✓ |
-| Feasibility/design doc with explicit verdict on shared constructor | ✓ | Option A direction; `amt_A/delay_A` naming locked as canonical; addendum issue pending to finalise base-class API with #24 |
+| Feasibility/design doc with explicit verdict on shared constructor | ✓ | Option A confirmed; `amt_A/delay_A` naming canonical; base-class API signed off in #27; production base implemented in #28 |
 | All code under local/exploration/delay-discounting/; no R/ or inst/ changes | ✓ | Verified |
