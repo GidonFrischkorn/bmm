@@ -70,16 +70,27 @@ identifiability concern. Coverage for c is adequate (0.88).
 fell outside 90% CI [0.884, 2.028] due to the prior pulling toward
 exp(0.5)≈1.65. Problem shrank from N=20→15→6 due to runtime.
 
-**Phase 2a (pending re-run)**: multinomial-aggregated likelihood collapses
-N×S×n Stan evaluations to N×S. For N=20, S=12, n=90: 21,600→240
-evaluations (≈90× faster per MCMC draw). Prior changed to
-`mu_log_c ~ N(0, 1)`. N restored to 20. Expected results pending.
+**Phase 2a (N=20, n=90, seed 777, CmdStan 2.38, 4 chains × 500 draws, 52 s)**:
+multinomial aggregation confirmed — 21,600→240 Stan evaluations (90× speedup)
+vs 924 s for the old N=6 run. All group-level parameters recovered within 90% CI:
+
+| Param | True | Posterior | 90% CI | In CI |
+|---|---|---|---|---|
+| mean_c | 0.800 | 0.868 | [0.628, 1.156] | YES |
+| mean_gamma | 1.500 | 1.604 | [1.164, 2.052] | YES |
+| mean_w1 | 0.650 | 0.662 | [0.605, 0.715] | YES |
+| sigma_log_c | 0.400 | 0.500 | [0.284, 0.719] | YES |
+| sigma_log_gamma | 0.400 | 0.346 | [0.036, 0.689] | YES |
+| sigma_w1_logit | 0.500 | 0.610 | [0.414, 0.846] | YES |
+
+Subject-level: r(c)=0.89, r(w1)=0.85 (N=20). Rhat max=1.042; 0 divergences.
+Note: ESS for sigma_log_gamma ≈ 118 — use iter_sampling=1000 for production runs.
 
 Key implementation decisions confirmed:
 - Non-centred parameterisation is stable with adapt_delta=0.90
-- Divergences: 0 confirmed in Phase 1
 - Per-(subj, stimulus) multinomial aggregation is exact (no approximation)
 - Stimulus-indexed D_stim passes 12 matrices, not T matrices
+- `N(0, 1)` prior on log(c) restores true mean_c=0.8 inside the 90% CI
 
 ### 5. Real-data fit (06_realdata_fit.R)
 
@@ -160,6 +171,15 @@ vector. For a nosof88-scale design with n=25 trials/stim, this collapses
 300 categorical evaluations to 12 multinomial evaluations (25× faster per
 additional replicate). For the hierarchical case (N subjects) it collapses
 N×S×n evaluations to N×S.
+
+**Log-space numerical stability**: when sensitivity `c` is large (>2 in
+nosof88 coordinates) or K/M is large, the naive per-exemplar activation
+`act_k = sum(exp(-c*d))` underflows to 0, causing `log(0) = -Inf` and
+NaN in the subsequent `softmax`. The fix accumulates in log space —
+`log_act[k] = log_sum_exp(-c*d[j] for j in cat k)` — and uses
+`multinomial_logit_lpmf(counts | la)` instead of
+`multinomial_lpmf(counts | softmax(la))`, avoiding the explicit softmax
+and eliminating the simplex-sum-NaN warnings entirely.
 
 Cost estimate: ~60–70 draws/s for the nosof88 prototype (S=12, J=12, M=2,
 n=25/stim). The rocks scale (S≈150, J=90, M=8) requires benchmarking;

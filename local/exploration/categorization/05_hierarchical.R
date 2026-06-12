@@ -131,16 +131,16 @@ functions {
   vector gcm_log_act(matrix D_t, vector w, real c, real gamma,
                      vector log_bias, array[] int ex_cat, int K) {
     int J = rows(D_t);
-    vector[J] sims;
+    vector[J] log_sims;
     vector[K] log_act;
     for (j in 1:J) {
       real d = sqrt(dot_product(w, D_t[j, ]'));
-      sims[j] = exp(-c * d);
+      log_sims[j] = -c * d;
     }
     for (k in 1:K) {
-      real act_k = 0;
-      for (j in 1:J) if (ex_cat[j] == k) act_k += sims[j];
-      log_act[k] = log(act_k);
+      real la_k = negative_infinity();
+      for (j in 1:J) if (ex_cat[j] == k) la_k = log_sum_exp(la_k, log_sims[j]);
+      log_act[k] = la_k;
     }
     return gamma * log_act + log_bias;
   }
@@ -193,7 +193,7 @@ model {
     for (s in 1:S) {
       vector[K] la = gcm_log_act(D_stim[s], w, subj_c[n], subj_gamma[n],
                                   log_bias, ex_cat, K);
-      target += multinomial_lpmf(y_counts[n, s] | softmax(la));
+      target += multinomial_logit_lpmf(y_counts[n, s] | la);
     }
   }
 }
