@@ -122,9 +122,9 @@ U_B_g <- prelec_1p(p_B_g[trl_g], gammaw_s[subj_g]) *
 choices_g <- rbinom(N_SUBJ * N_G, 1L, cpt_choice_prob(U_A_g, U_B_g, phi = 1.0))
 
 d_bmm_gains <- data.frame(
-  subj = subj_g, trial = trl_g,
-  x_A = x_A_g[trl_g], p_A = p_A_g[trl_g],
-  x_B = x_B_g[trl_g], p_B = p_B_g[trl_g],
+  subj  = subj_g, trial = trl_g,
+  amt_A = x_A_g[trl_g], prob_A = p_A_g[trl_g],
+  amt_B = x_B_g[trl_g], prob_B = p_B_g[trl_g],
   choice = choices_g
 )
 
@@ -177,12 +177,12 @@ cat(sprintf("Mixed design: N=%d subj × %d trials, P(gamble)=%.3f\n\n",
 cat("--- SECTION 3: brms NLF fit (gains-only, alpha/gammaw; phi=1, lambda not estimated) ---\n\n")
 
 formula_brms_gains <- bf(
-  choice ~ exp(-((-log(p_A))^gammaw) - (-(log(x_A)))*alpha) -
-           exp(-((-log(p_B))^gammaw) - (-(log(x_B)))*alpha),
-  # Equivalent to: wA*x_A^alpha - wB*x_B^alpha using log-sum for numerical stability
+  choice ~ exp(-((-log(prob_A))^gammaw) - (-(log(amt_A)))*alpha) -
+           exp(-((-log(prob_B))^gammaw) - (-(log(amt_B)))*alpha),
+  # Equivalent to: wA*amt_A^alpha - wB*amt_B^alpha using log-sum for numerical stability
   # Simplified NLF:
-  nlf(lUA ~ log(x_A) * alpha - ((-log(p_A))^gammaw)),
-  nlf(lUB ~ log(x_B) * alpha - ((-log(p_B))^gammaw)),
+  nlf(lUA ~ log(amt_A) * alpha - ((-log(prob_A))^gammaw)),
+  nlf(lUB ~ log(amt_B) * alpha - ((-log(prob_B))^gammaw)),
   alpha  ~ 1 + (1 | subj),
   gammaw ~ 1 + (1 | subj),
   nl = TRUE
@@ -190,8 +190,8 @@ formula_brms_gains <- bf(
 
 # Cleaner formulation (avoids log-sum confusion): direct NLF
 formula_brms_gains <- bf(
-  choice ~ exp(-((-log(p_A))^gammaw)) * x_A^alpha -
-           exp(-((-log(p_B))^gammaw)) * x_B^alpha,
+  choice ~ exp(-((-log(prob_A))^gammaw)) * amt_A^alpha -
+           exp(-((-log(prob_B))^gammaw)) * amt_B^alpha,
   alpha  ~ 1 + (1 | subj),
   gammaw ~ 1 + (1 | subj),
   nl = TRUE
@@ -212,6 +212,7 @@ fit_brms_gains <- suppressWarnings(brm(
   family  = bernoulli(link = "logit"),
   prior   = priors_brms_gains,
   chains  = 2L, iter = 1000L, warmup = 500L, cores = 2L,
+  seed    = 47L,
   refresh = 200,
   control = list(adapt_delta = 0.95),
   backend = "cmdstanr",
@@ -404,6 +405,7 @@ fit_brms_mixed <- suppressWarnings(brm(
   family  = bernoulli(link = "logit"),
   prior   = priors_brms_mixed,
   chains  = 2L, iter = 1000L, warmup = 500L, cores = 2L,
+  seed    = 48L,
   refresh = 200,
   control = list(adapt_delta = 0.95),
   backend = "cmdstanr",

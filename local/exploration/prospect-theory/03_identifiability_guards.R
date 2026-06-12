@@ -44,7 +44,7 @@ cat("--- SECTION 1: Guard function implementations ---\n\n")
 # near p=0.5). Both low probabilities (p < 0.2) and high probabilities (p > 0.8)
 # should be present.
 
-check_prob_range <- function(data, p_A_col = "p_A", p_B_col = "p_B",
+check_prob_range <- function(data, p_A_col = "prob_A", p_B_col = "prob_B",
                               low_threshold = 0.20, high_threshold = 0.80) {
   p_vals <- c(data[[p_A_col]], data[[p_B_col]])
   p_vals <- p_vals[!is.na(p_vals)]
@@ -71,7 +71,7 @@ check_prob_range <- function(data, p_A_col = "p_A", p_B_col = "p_B",
 # clustered in a narrow band (e.g. all between $4 and $5), alpha is aliased with
 # a simple scaling of utility.
 
-check_outcome_range <- function(data, x_A_col = "x_A", x_B_col = "x_B",
+check_outcome_range <- function(data, x_A_col = "amt_A", x_B_col = "amt_B",
                                  min_ratio_threshold = 3.0) {
   x_A <- data[[x_A_col]]; x_B <- data[[x_B_col]]
   x_gains <- abs(c(x_A[x_A > 0], x_B[x_B > 0]))
@@ -101,7 +101,7 @@ check_outcome_range <- function(data, x_A_col = "x_A", x_B_col = "x_B",
 # tight phi prior, which is rarely available in practice.
 # Recommendation: either fix phi=1 OR use multi-outcome mixed gambles.
 
-check_phi_lambda_confound <- function(data, x_A_col = "x_A", x_B_col = "x_B",
+check_phi_lambda_confound <- function(data, x_A_col = "amt_A", x_B_col = "amt_B",
                                        phi_fixed = FALSE) {
   if (phi_fixed) return(invisible(TRUE))
   x_A <- data[[x_A_col]]; x_B <- data[[x_B_col]]
@@ -138,7 +138,7 @@ check_phi_lambda_confound <- function(data, x_A_col = "x_A", x_B_col = "x_B",
 # branch of v(x) is never evaluated. If the data has no negative outcomes,
 # lambda is structurally unidentified: any value of lambda gives identical fits.
 
-check_lambda_identifiability <- function(data, x_A_col = "x_A", x_B_col = "x_B") {
+check_lambda_identifiability <- function(data, x_A_col = "amt_A", x_B_col = "amt_B") {
   x_all <- c(data[[x_A_col]], data[[x_B_col]])
   has_losses <- any(x_all < 0, na.rm = TRUE)
   if (!has_losses) {
@@ -186,8 +186,8 @@ check_alpha_beta_constraint <- function(alpha_free = TRUE, beta_free = TRUE) {
 
 # ---- Combined pre-flight validator -------------------------------------------
 check_cpt_design <- function(data,
-                              x_A_col = "x_A", x_B_col = "x_B",
-                              p_A_col = "p_A", p_B_col = "p_B",
+                              x_A_col = "amt_A", x_B_col = "amt_B",
+                              p_A_col = "prob_A", p_B_col = "prob_B",
                               estimate_lambda = TRUE,
                               alpha_free = TRUE,
                               beta_free = FALSE,  # default: alpha=beta constraint
@@ -272,9 +272,9 @@ cat("G1: Probability weighting identifiability\n\n")
 
 # Deficient: all p near 0.5
 d_bad_p <- data.frame(
-  subj = rep(1:10, each = 50),
-  x_A  = runif(500, 1, 10), p_A = runif(500, 0.40, 0.60),
-  x_B  = runif(500, 1, 10), p_B = runif(500, 0.40, 0.60),
+  subj  = rep(1:10, each = 50),
+  amt_A = runif(500, 1, 10), prob_A = runif(500, 0.40, 0.60),
+  amt_B = runif(500, 1, 10), prob_B = runif(500, 0.40, 0.60),
   choice = rbinom(500, 1, 0.5)
 )
 cat("Deficient (all p in [0.40, 0.60]):\n")
@@ -294,9 +294,9 @@ r_g1_fail <- tryCatch(
 
 # Adequate: p covers low and high range
 d_good_p <- data.frame(
-  subj = rep(1:10, each = 60),
-  x_A  = runif(600, 1, 10), p_A = runif(600, 0.05, 0.95),
-  x_B  = runif(600, 1, 10), p_B = runif(600, 0.05, 0.95),
+  subj  = rep(1:10, each = 60),
+  amt_A = runif(600, 1, 10), prob_A = runif(600, 0.05, 0.95),
+  amt_B = runif(600, 1, 10), prob_B = runif(600, 0.05, 0.95),
   choice = rbinom(600, 1, 0.5)
 )
 cat("\nAdequate (p in [0.05, 0.95]):\n")
@@ -320,10 +320,10 @@ cat("G2: Value-function curvature identifiability\n\n")
 
 # Deficient: narrow outcome range
 d_narrow <- data.frame(
-  x_A = runif(500, 4.5, 5.5),
-  x_B = runif(500, 4.5, 5.5),
-  p_A = runif(500, 0.1, 0.9),
-  p_B = runif(500, 0.1, 0.9),
+  amt_A  = runif(500, 4.5, 5.5),
+  amt_B  = runif(500, 4.5, 5.5),
+  prob_A = runif(500, 0.1, 0.9),
+  prob_B = runif(500, 0.1, 0.9),
   choice = rbinom(500, 1, 0.5)
 )
 cat("Deficient (x in [4.5, 5.5], range ratio = 1.22):\n")
@@ -334,10 +334,10 @@ r_g2_fail <- tryCatch(
 
 # Adequate: wide outcome range
 d_wide <- data.frame(
-  x_A = runif(500, 1, 20),
-  x_B = runif(500, 1, 20),
-  p_A = runif(500, 0.1, 0.9),
-  p_B = runif(500, 0.1, 0.9),
+  amt_A  = runif(500, 1, 20),
+  amt_B  = runif(500, 1, 20),
+  prob_A = runif(500, 0.1, 0.9),
+  prob_B = runif(500, 0.1, 0.9),
   choice = rbinom(500, 1, 0.5)
 )
 cat("\nAdequate (x in [1, 20], range ratio = 20):\n")
@@ -355,10 +355,10 @@ cat("G3: phi/lambda confound\n\n")
 
 # Deficient: gain-vs-gain and loss-vs-loss only (no cross-domain trials)
 d_nocross <- data.frame(
-  x_A = c(runif(250, 1, 10), -runif(250, 1, 10)),
-  x_B = c(runif(250, 1, 10), -runif(250, 1, 10)),
-  p_A = runif(500, 0.1, 0.9),
-  p_B = runif(500, 0.1, 0.9),
+  amt_A  = c(runif(250, 1, 10), -runif(250, 1, 10)),
+  amt_B  = c(runif(250, 1, 10), -runif(250, 1, 10)),
+  prob_A = runif(500, 0.1, 0.9),
+  prob_B = runif(500, 0.1, 0.9),
   choice = rbinom(500, 1, 0.5)
 )
 cat("Deficient (gain-vs-gain + loss-vs-loss only; phi NOT fixed):\n")
@@ -394,10 +394,10 @@ cat("\n")
 cat("G4: Lambda identifiability (gains-only design)\n\n")
 
 d_gains_only <- data.frame(
-  x_A = runif(500, 1, 10),
-  x_B = runif(500, 1, 10),
-  p_A = runif(500, 0.1, 0.9),
-  p_B = runif(500, 0.1, 0.9),
+  amt_A  = runif(500, 1, 10),
+  amt_B  = runif(500, 1, 10),
+  prob_A = runif(500, 0.1, 0.9),
+  prob_B = runif(500, 0.1, 0.9),
   choice = rbinom(500, 1, 0.5)
 )
 cat("Deficient (gains-only, no negative outcomes):\n")
@@ -407,10 +407,10 @@ r_g4_fail <- tryCatch(
 )
 
 d_mixed <- data.frame(
-  x_A = c(runif(250, 1, 10), -runif(250, 1, 10)),
-  x_B = c(runif(250, 1, 10), -runif(250, 1, 10)),
-  p_A = runif(500, 0.1, 0.9),
-  p_B = runif(500, 0.1, 0.9),
+  amt_A  = c(runif(250, 1, 10), -runif(250, 1, 10)),
+  amt_B  = c(runif(250, 1, 10), -runif(250, 1, 10)),
+  prob_A = runif(500, 0.1, 0.9),
+  prob_B = runif(500, 0.1, 0.9),
   choice = rbinom(500, 1, 0.5)
 )
 cat("Adequate (gains + losses design):\n")
@@ -477,10 +477,10 @@ r_demo2 <- tryCatch(
 
 cat("\nDemo 3: Well-designed CPT study (should pass all)\n")
 d_good <- data.frame(
-  x_A = c(runif(250, 1, 15), -runif(250, 1, 15)),
-  x_B = c(runif(250, 1, 15), -runif(250, 1, 15)),
-  p_A = runif(500, 0.05, 0.95),
-  p_B = runif(500, 0.05, 0.95),
+  amt_A  = c(runif(250, 1, 15), -runif(250, 1, 15)),
+  amt_B  = c(runif(250, 1, 15), -runif(250, 1, 15)),
+  prob_A = runif(500, 0.05, 0.95),
+  prob_B = runif(500, 0.05, 0.95),
   choice = rbinom(500, 1, 0.5)
 )
 r_demo3 <- tryCatch(

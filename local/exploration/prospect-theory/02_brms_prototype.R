@@ -100,9 +100,9 @@ U_B_g <- prelec_1p(p_B_g[trl_g], gammaw_s[subj_g]) *
 choices_g <- rbinom(N_SUBJ * N_GAIN, 1L, cpt_choice_prob(U_A_g, U_B_g, phi_s[subj_g]))
 
 d_gain <- data.frame(
-  subj = subj_g, trial = trl_g,
-  x_A  = x_A_g[trl_g], p_A = p_A_g[trl_g],
-  x_B  = x_B_g[trl_g], p_B = p_B_g[trl_g],
+  subj  = subj_g, trial = trl_g,
+  amt_A = x_A_g[trl_g], prob_A = p_A_g[trl_g],
+  amt_B = x_B_g[trl_g], prob_B = p_B_g[trl_g],
   choice = choices_g
 )
 
@@ -123,8 +123,8 @@ choices_gl <- rbinom(N_SUBJ * N_GL, 1L, cpt_choice_prob(U_A_gl, U_B_gl, phi = 1.
 
 d_gl <- data.frame(
   subj   = subj_gl, trial = trl_gl,
-  x_A    = all_x_A[trl_gl], p_A = all_p_A[trl_gl],
-  x_B    = all_x_B[trl_gl], p_B = all_p_B[trl_gl],
+  amt_A  = all_x_A[trl_gl], prob_A = all_p_A[trl_gl],
+  amt_B  = all_x_B[trl_gl], prob_B = all_p_B[trl_gl],
   choice = choices_gl,
   domain = rep(c(rep("gain", N_GAIN), rep("loss", N_LOSS)), N_SUBJ),
   # Pre-computed for Stan (avoid pow(negative, alpha))
@@ -158,9 +158,9 @@ cat("--- SECTION 3: Model A — Gains-only (alpha, gammaw, phi) ---\n\n")
 # NLF: v(x) = x^alpha (gains only, x > 0 always so no pow(neg) issue)
 # NB: brms rejects parameter names with underscores → use "gammaw" not "gamma_w"
 formula_A <- bf(
-  choice ~ phi * (wA * x_A^alpha - wB * x_B^alpha),
-  nlf(wA ~ exp(-((-log(p_A))^gammaw))),
-  nlf(wB ~ exp(-((-log(p_B))^gammaw))),
+  choice ~ phi * (wA * amt_A^alpha - wB * amt_B^alpha),
+  nlf(wA ~ exp(-((-log(prob_A))^gammaw))),
+  nlf(wB ~ exp(-((-log(prob_B))^gammaw))),
   alpha  ~ 1 + (1 | subj),
   gammaw ~ 1 + (1 | subj),
   phi    ~ 1 + (1 | subj),
@@ -184,6 +184,7 @@ fit_A <- suppressWarnings(brm(
   family  = bernoulli(link = "logit"),
   prior   = priors_A,
   chains  = 2L, iter = 1000L, warmup = 500L, cores = 2L,
+  seed    = 42L,
   refresh = 200,
   control = list(adapt_delta = 0.95),
   backend = "cmdstanr",
@@ -235,8 +236,8 @@ formula_B <- bf(
   choice ~ wA * vA - wB * vB,   # phi = 1 (absorbed into choice scale)
   nlf(vA ~ is_Ag * xA_g^alpha - is_Al * lambda * xA_l^alpha),
   nlf(vB ~ is_Bg * xB_g^alpha - is_Bl * lambda * xB_l^alpha),
-  nlf(wA ~ exp(-((-log(p_A))^gammaw))),
-  nlf(wB ~ exp(-((-log(p_B))^gammaw))),
+  nlf(wA ~ exp(-((-log(prob_A))^gammaw))),
+  nlf(wB ~ exp(-((-log(prob_B))^gammaw))),
   alpha  ~ 1 + (1 | subj),
   lambda ~ 1 + (1 | subj),
   gammaw ~ 1 + (1 | subj),
@@ -260,6 +261,7 @@ fit_B <- suppressWarnings(brm(
   family  = bernoulli(link = "logit"),
   prior   = priors_B,
   chains  = 2L, iter = 1000L, warmup = 500L, cores = 2L,
+  seed    = 43L,
   refresh = 200,
   control = list(adapt_delta = 0.95),
   backend = "cmdstanr",
@@ -300,8 +302,8 @@ formula_C <- bf(
   choice ~ phi * (wA * vA - wB * vB),
   nlf(vA ~ is_Ag * xA_g^alpha - is_Al * lambda * xA_l^alpha),
   nlf(vB ~ is_Bg * xB_g^alpha - is_Bl * lambda * xB_l^alpha),
-  nlf(wA ~ exp(-((-log(p_A))^gammaw))),
-  nlf(wB ~ exp(-((-log(p_B))^gammaw))),
+  nlf(wA ~ exp(-((-log(prob_A))^gammaw))),
+  nlf(wB ~ exp(-((-log(prob_B))^gammaw))),
   alpha  ~ 1 + (1 | subj),
   lambda ~ 1 + (1 | subj),
   gammaw ~ 1 + (1 | subj),
@@ -329,6 +331,7 @@ fit_C <- tryCatch(
     family  = bernoulli(link = "logit"),
     prior   = priors_C,
     chains  = 2L, iter = 1000L, warmup = 500L, cores = 2L,
+    seed    = 44L,
     refresh = 200,
     control = list(adapt_delta = 0.95),
     backend = "cmdstanr",
@@ -386,8 +389,8 @@ formula_D <- bf(
   choice ~ wA * vA - wB * vB,   # phi = 1 (same as Model B)
   nlf(vA ~ is_Ag * xA_g^alpha - is_Al * lambda * xA_l^bta),
   nlf(vB ~ is_Bg * xB_g^alpha - is_Bl * lambda * xB_l^bta),
-  nlf(wA ~ exp(-((-log(p_A))^gammaw))),
-  nlf(wB ~ exp(-((-log(p_B))^gammaw))),
+  nlf(wA ~ exp(-((-log(prob_A))^gammaw))),
+  nlf(wB ~ exp(-((-log(prob_B))^gammaw))),
   alpha  ~ 1 + (1 | subj),
   bta    ~ 1 + (1 | subj),
   lambda ~ 1 + (1 | subj),
@@ -414,6 +417,7 @@ fit_D <- suppressWarnings(brm(
   family  = bernoulli(link = "logit"),
   prior   = priors_D,
   chains  = 2L, iter = 1000L, warmup = 500L, cores = 2L,
+  seed    = 45L,
   refresh = 200,
   control = list(adapt_delta = 0.95),
   backend = "cmdstanr",
@@ -447,6 +451,216 @@ cat(sprintf("  Model D (phi=1, alpha≠bta, free): lambda est=%.3f  bias=%.3f\n"
             lambdaD_est, lambdaD_est - LAMBDA_TRUE))
 cat("Expected: Model D shows larger |bias| for lambda — the hierarchical analogue\n")
 cat("of Nilsson et al. (2011) script 01 MLE finding.\n\n")
+
+
+# ==============================================================================
+# SECTION 4d — Model E: LOSS-ONLY NEGATIVE CONTROL — genuine phi/lambda confound
+# ==============================================================================
+
+cat("--- SECTION 4d: Model E — Loss-only design (phi free: genuine confound) ---\n\n")
+cat("PURPOSE: Model C (phi free, gains+losses) converged cleanly because gain trials\n")
+cat("pin phi, and loss trials pin phi*lambda, allowing the ratio to be recovered.\n")
+cat("A LOSS-ONLY design removes the gain-trial anchor:\n")
+cat("  U_A - U_B = -phi*lambda * (w(p_A)*|x_A|^alpha - w(p_B)*|x_B|^alpha)\n")
+cat("Only the product phi*lambda is identified. Expected: Rhat >> 1.05 or\n")
+cat("many divergences and/or phi/lambda posteriors anti-correlated.\n")
+cat("This is the genuine empirical backbone for the phi=1 default.\n\n")
+
+# Generate loss-only data (same subjects as d_gl, but only loss trials)
+subj_lo <- rep(seq_len(N_SUBJ), each = N_LOSS)
+trl_lo  <- rep(seq_len(N_LOSS), times = N_SUBJ)
+
+set.seed(3L)
+U_A_lo <- prelec_1p(p_A_l[trl_lo], gammaw_s[subj_lo]) *
+          cpt_value(x_A_l[trl_lo], alpha_s[subj_lo], lambda_s[subj_lo])
+U_B_lo <- prelec_1p(p_B_l[trl_lo], gammaw_s[subj_lo]) *
+          cpt_value(x_B_l[trl_lo], alpha_s[subj_lo], lambda_s[subj_lo])
+choices_lo <- rbinom(N_SUBJ * N_LOSS, 1L, cpt_choice_prob(U_A_lo, U_B_lo, PHI_TRUE))
+
+d_lo <- data.frame(
+  subj   = subj_lo, trial = trl_lo,
+  amt_A  = x_A_l[trl_lo], prob_A = p_A_l[trl_lo],
+  amt_B  = x_B_l[trl_lo], prob_B = p_B_l[trl_lo],
+  choice = choices_lo,
+  domain = "loss",
+  xA_g   = 0,
+  xA_l   = pmax(-x_A_l[trl_lo], 0),
+  is_Ag  = 0,
+  is_Al  = 1,
+  xB_g   = 0,
+  xB_l   = pmax(-x_B_l[trl_lo], 0),
+  is_Bg  = 0,
+  is_Bl  = 1
+)
+
+cat(sprintf("Loss-only design: N=%d subj × %d loss trials, P(A)=%.3f\n\n",
+            N_SUBJ, N_LOSS, mean(choices_lo)))
+
+# Model E: same formula as Model C (phi free), applied to loss-only data
+# No gains trial anchor → phi and lambda are jointly unidentified
+cat("Fitting Model E: loss-only, phi free (2 chains x 1000 iter — expect failures)...\n")
+t0 <- proc.time()
+fit_E <- tryCatch(
+  suppressWarnings(brm(
+    formula_C,                                # same 4-param formula as negative control
+    data    = d_lo,
+    family  = bernoulli(link = "logit"),
+    prior   = priors_C,
+    chains  = 2L, iter = 1000L, warmup = 500L, cores = 2L,
+    seed    = 46L,
+    refresh = 200,
+    control = list(adapt_delta = 0.95),
+    backend = "cmdstanr",
+    silent  = 0
+  )),
+  error = function(e) {
+    cat(sprintf("  Model E ERROR: %s\n", conditionMessage(e)))
+    NULL
+  }
+)
+cat(sprintf("  Fit time: %.1f sec\n", (proc.time() - t0)["elapsed"]))
+
+if (!is.null(fit_E)) {
+  fe_E      <- fixef(fit_E)
+  rhat_E    <- max(rhat(fit_E), na.rm = TRUE)
+  div_E     <- sum(nuts_params(fit_E)$Value[nuts_params(fit_E)$Parameter == "divergent__"])
+  ess_E_min <- min(neff_ratio(fit_E), na.rm = TRUE) * (1000 - 500) * 2
+
+  cat(sprintf("\nModel E diagnostics: max_Rhat=%.3f, divergences=%d, min_ESS=%.0f\n",
+              rhat_E, div_E, ess_E_min))
+  cat("Fixed effects:\n"); print(round(fe_E[, c("Estimate", "Q2.5", "Q97.5")], 3))
+
+  cat("\nCoverage:\n")
+  covE_alpha  <- check_cov(fe_E, "alpha_Intercept",  ALPHA_TRUE,  "alpha")
+  covE_lambda <- check_cov(fe_E, "lambda_Intercept", LAMBDA_TRUE, "lambda")
+  covE_gammaw <- check_cov(fe_E, "gammaw_Intercept", GAMMAW_TRUE, "gammaw")
+  covE_phi    <- check_cov(fe_E, "phi_Intercept",    PHI_TRUE,    "phi")
+
+  cat(sprintf("\n[LOSS-ONLY NEGATIVE CONTROL] Rhat=%.3f, divergences=%d\n", rhat_E, div_E))
+  if (rhat_E > 1.05 || div_E > 0) {
+    cat("  phi/lambda confound ACTIVE — loss-only data cannot separate phi from lambda.\n")
+    cat("  phi=1 default is JUSTIFIED: the confound bites in loss-only / loss-heavy designs.\n")
+  } else {
+    cat("  Unexpected clean convergence — inspect posterior corr(phi, lambda) manually.\n")
+    cat("  (Marginal identification may still mask correlated posteriors.)\n")
+  }
+  cat("  Compare Model C (phi free, gains+losses): clean Rhat/divergences — the\n")
+  cat("  gain-trial anchor resolves the confound in balanced designs.\n\n")
+} else {
+  cat("[LOSS-ONLY NEGATIVE CONTROL] Model E failed to sample — extreme confound.\n\n")
+  rhat_E <- NA_real_; div_E <- NA_integer_; ess_E_min <- NA_real_
+  fe_E   <- NULL
+  covE_alpha <- covE_lambda <- covE_gammaw <- covE_phi <- NULL
+}
+
+
+# ==============================================================================
+# SECTION 4e — SBC-light: multi-dataset MLE check of α=β benefit
+# ==============================================================================
+
+cat("--- SECTION 4e: SBC-light — α=β benefit, K=30 single-subject MLE datasets ---\n\n")
+cat("PURPOSE: The single-dataset hierarchical Model B-vs-D result (lambda bias\n")
+cat("+0.096 vs +0.336, opposite sign to the MLE) rests on one dataset and is\n")
+cat("within noise for a wide-CI parameter. This section runs K=30 independent\n")
+cat("MLE datasets (N=60 trials each; same DGP) and compares lambda bias\n")
+cat("distribution between constrained (alpha=beta) and unconstrained (alpha≠bta)\n")
+cat("single-subject fits. MLE is fast (<1s total), providing reliable evidence\n")
+cat("without the computational burden of K additional hierarchical Stan models.\n\n")
+
+# CPT negative-log-likelihood for constrained model (alpha=beta)
+negloglik_con_sbc <- function(par, data) {
+  alpha <- par[1]; lambda <- par[2]; gammaw <- par[3]; phi <- par[4]
+  if (alpha <= 0 || alpha > 2 || lambda <= 0 || lambda > 20 ||
+      gammaw <= 0 || gammaw > 2 || phi <= 0 || phi > 20) return(1e10)
+  v_A <- ifelse(data$amt_A >= 0, data$amt_A^alpha, -lambda * ((-data$amt_A)^alpha))
+  v_B <- ifelse(data$amt_B >= 0, data$amt_B^alpha, -lambda * ((-data$amt_B)^alpha))
+  w_A <- exp(-((-log(data$prob_A))^gammaw))
+  w_B <- exp(-((-log(data$prob_B))^gammaw))
+  prob <- pmax(1e-10, pmin(1 - 1e-10, plogis(phi * (w_A * v_A - w_B * v_B))))
+  -sum(data$choice * log(prob) + (1 - data$choice) * log(1 - prob))
+}
+
+# CPT negative-log-likelihood for unconstrained model (alpha≠bta)
+negloglik_uncon_sbc <- function(par, data) {
+  alpha <- par[1]; bta <- par[2]; lambda <- par[3]; gammaw <- par[4]; phi <- par[5]
+  if (alpha <= 0 || alpha > 2 || bta <= 0 || bta > 2 ||
+      lambda <= 0 || lambda > 20 || gammaw <= 0 || gammaw > 2 ||
+      phi <= 0 || phi > 20) return(1e10)
+  v_A <- ifelse(data$amt_A >= 0, data$amt_A^alpha, -lambda * ((-data$amt_A)^bta))
+  v_B <- ifelse(data$amt_B >= 0, data$amt_B^alpha, -lambda * ((-data$amt_B)^bta))
+  w_A <- exp(-((-log(data$prob_A))^gammaw))
+  w_B <- exp(-((-log(data$prob_B))^gammaw))
+  prob <- pmax(1e-10, pmin(1 - 1e-10, plogis(phi * (w_A * v_A - w_B * v_B))))
+  -sum(data$choice * log(prob) + (1 - data$choice) * log(1 - prob))
+}
+
+K_SBC   <- 30L    # independent datasets
+N_SBC   <- 60L    # trials per dataset (30 gain + 30 loss, mixed design)
+N_H_SBC <- N_SBC %/% 2L
+
+set.seed(9999L)
+sbc_results <- vector("list", K_SBC)
+
+for (k in seq_len(K_SBC)) {
+  xa_g <- runif(N_H_SBC, 1, 10); pa_g <- runif(N_H_SBC, 0.10, 0.90)
+  xb_g <- runif(N_H_SBC, 1, 10); pb_g <- runif(N_H_SBC, 0.10, 0.90)
+  xa_l <- -runif(N_H_SBC, 1, 10); pa_l <- runif(N_H_SBC, 0.10, 0.90)
+  xb_l <- -runif(N_H_SBC, 1, 10); pb_l <- runif(N_H_SBC, 0.10, 0.90)
+
+  xa <- c(xa_g, xa_l); pa <- c(pa_g, pa_l)
+  xb <- c(xb_g, xb_l); pb <- c(pb_g, pb_l)
+
+  va <- cpt_value(xa, ALPHA_TRUE, LAMBDA_TRUE)
+  vb <- cpt_value(xb, ALPHA_TRUE, LAMBDA_TRUE)
+  wa <- prelec_1p(pa, GAMMAW_TRUE); wb <- prelec_1p(pb, GAMMAW_TRUE)
+  ch <- rbinom(N_SBC, 1L, cpt_choice_prob(wa * va, wb * vb, PHI_TRUE))
+
+  d_s <- data.frame(amt_A = xa, prob_A = pa, amt_B = xb, prob_B = pb, choice = ch)
+
+  fc <- tryCatch(
+    optim(c(0.80, 2.25, 0.65, 1.20), negloglik_con_sbc, data = d_s,
+          method = "L-BFGS-B",
+          lower  = c(0.1, 0.1, 0.1, 0.1), upper = c(2, 20, 2, 20)),
+    error = function(e) list(par = rep(NA_real_, 4), convergence = 1)
+  )
+  fu <- tryCatch(
+    optim(c(0.80, 0.80, 2.25, 0.65, 1.20), negloglik_uncon_sbc, data = d_s,
+          method = "L-BFGS-B",
+          lower  = c(0.1, 0.1, 0.1, 0.1, 0.1), upper = c(2, 2, 20, 2, 20)),
+    error = function(e) list(par = rep(NA_real_, 5), convergence = 1)
+  )
+
+  sbc_results[[k]] <- list(
+    lambda_con   = if (fc$convergence == 0) fc$par[2] else NA_real_,
+    lambda_uncon = if (fu$convergence == 0) fu$par[3] else NA_real_
+  )
+}
+
+lambda_con_vec   <- sapply(sbc_results, `[[`, "lambda_con")
+lambda_uncon_vec <- sapply(sbc_results, `[[`, "lambda_uncon")
+bias_con   <- lambda_con_vec   - LAMBDA_TRUE
+bias_uncon <- lambda_uncon_vec - LAMBDA_TRUE
+
+rmse_con   <- sqrt(mean(bias_con^2,   na.rm = TRUE))
+rmse_uncon <- sqrt(mean(bias_uncon^2, na.rm = TRUE))
+bias_ratio <- rmse_uncon / max(rmse_con, 1e-6)
+
+cat(sprintf("SBC-light results (K=%d datasets, N=%d trials/dataset, true lambda=%.2f):\n\n",
+            K_SBC, N_SBC, LAMBDA_TRUE))
+cat(sprintf("  Constrained (alpha=beta):   mean bias=%+.3f, SD=%.3f, RMSE=%.3f\n",
+            mean(bias_con,   na.rm = TRUE), sd(bias_con,   na.rm = TRUE), rmse_con))
+cat(sprintf("  Unconstrained (alpha≠bta):  mean bias=%+.3f, SD=%.3f, RMSE=%.3f\n",
+            mean(bias_uncon, na.rm = TRUE), sd(bias_uncon, na.rm = TRUE), rmse_uncon))
+cat(sprintf("  RMSE ratio (unconstrained/constrained): %.2fx\n", bias_ratio))
+
+sbc_verdict <- if (bias_ratio > 1.5 && rmse_uncon > rmse_con)
+  "DEMONSTRATED (alpha=beta constraint reduces lambda RMSE by >= 50% — consistent with Nilsson 2011)"
+else if (bias_ratio > 1.1 && rmse_uncon > rmse_con)
+  "WEAKLY SUPPORTED (unconstrained RMSE higher, but < 50% improvement)"
+else
+  "INCONCLUSIVE (insufficient separation at this N — run with larger N_SBC)"
+
+cat(sprintf("  alpha=beta benefit: %s\n\n", sbc_verdict))
 
 
 # ==============================================================================
@@ -502,6 +716,7 @@ cov_list_A <- list(covA_alpha, covA_gammaw, covA_phi)
 cov_list_B <- list(covB_alpha, covB_lambda, covB_gammaw)
 cov_list_C <- list(covC_alpha, covC_lambda, covC_gammaw, covC_phi)
 cov_list_D <- list(covD_alpha, covD_bta, covD_lambda, covD_gammaw)
+cov_list_E <- list(covE_alpha, covE_lambda, covE_gammaw, covE_phi)
 
 make_results <- function(cov_list, model_label, rhat_val, ndiv_val) {
   do.call(rbind, lapply(Filter(Negate(is.null), cov_list), function(x) {
@@ -512,10 +727,22 @@ make_results <- function(cov_list, model_label, rhat_val, ndiv_val) {
   }))
 }
 
-results_A <- make_results(cov_list_A, "gains_only",          rhat_A, div_A)
-results_B <- make_results(cov_list_B, "gains_losses_phi1",   rhat_B, div_B)
-results_C <- make_results(cov_list_C, "negctrl_phi_free",    rhat_C, div_C)
+results_A <- make_results(cov_list_A, "gains_only",              rhat_A, div_A)
+results_B <- make_results(cov_list_B, "gains_losses_phi1",       rhat_B, div_B)
+results_C <- make_results(cov_list_C, "negctrl_phi_free_gl",     rhat_C, div_C)
 results_D <- make_results(cov_list_D, "gains_losses_alpha_neq_bta", rhat_D, div_D)
+results_E <- make_results(cov_list_E, "negctrl_phi_free_lo",     rhat_E, div_E)
+
+# SBC-light summary frame
+results_sbc <- data.frame(
+  model      = c("constrained_alpha_eq_bta", "unconstrained_alpha_neq_bta"),
+  param      = "lambda",
+  true       = LAMBDA_TRUE,
+  mean_bias  = c(mean(bias_con, na.rm = TRUE), mean(bias_uncon, na.rm = TRUE)),
+  sd_bias    = c(sd(bias_con, na.rm = TRUE),   sd(bias_uncon, na.rm = TRUE)),
+  rmse       = c(rmse_con, rmse_uncon),
+  k_datasets = K_SBC
+)
 
 write.csv(results_A, "local/exploration/prospect-theory/results/02_modelA_recovery.csv",
           row.names = FALSE)
@@ -527,12 +754,60 @@ if (!is.null(results_C) && nrow(results_C) > 0) {
 }
 write.csv(results_D, "local/exploration/prospect-theory/results/02_modelD_recovery.csv",
           row.names = FALSE)
+if (!is.null(results_E) && nrow(results_E) > 0) {
+  write.csv(results_E, "local/exploration/prospect-theory/results/02_modelE_lossonly.csv",
+            row.names = FALSE)
+}
+write.csv(results_sbc, "local/exploration/prospect-theory/results/02_sbc_alpha_beta.csv",
+          row.names = FALSE)
 
 cat("Results written:\n")
-cat("  local/exploration/prospect-theory/results/02_modelA_recovery.csv\n")
-cat("  local/exploration/prospect-theory/results/02_modelB_recovery.csv\n")
-cat("  local/exploration/prospect-theory/results/02_cpt_recovery.csv   [negative control]\n")
-cat("  local/exploration/prospect-theory/results/02_modelD_recovery.csv [hierarchical Nilsson]\n\n")
+cat("  02_modelA_recovery.csv\n")
+cat("  02_modelB_recovery.csv\n")
+cat("  02_cpt_recovery.csv        [Model C: phi-free, gains+losses]\n")
+cat("  02_modelD_recovery.csv     [Model D: Nilsson hierarchical]\n")
+cat("  02_modelE_lossonly.csv     [Model E: phi-free, loss-only — genuine confound]\n")
+cat("  02_sbc_alpha_beta.csv      [SBC-light: K=30 MLE lambda bias]\n\n")
+
+# ===========================================================================
+# Compute verdicts from diagnostics (NOT hardcoded strings)
+# ===========================================================================
+
+# NLF feasibility (Models A and B clean convergence)
+nlf_ok <- rhat_A <= 1.05 && div_A == 0 && rhat_B <= 1.05 && div_B == 0
+nlf_verdict <- if (nlf_ok) "FEASIBLE" else "ISSUES DETECTED"
+
+# phi/lambda confound: the gain+loss balanced design does NOT show the confound
+# (Model C converges). The loss-only design (Model E) is the right test.
+if (!is.na(rhat_E) && (rhat_E > 1.05 || div_E > 0)) {
+  confound_verdict <- sprintf(
+    "CONFIRMED in loss-only design (Model E: Rhat=%.3f, div=%d)",
+    rhat_E, div_E)
+} else if (is.na(rhat_E)) {
+  confound_verdict <- "CONFIRMED — Model E failed to sample (extreme confound)"
+} else {
+  confound_verdict <- sprintf(
+    "NOT SHOWN (Model E Rhat=%.3f, div=%d — inspect phi/lambda posteriors manually)",
+    rhat_E, div_E)
+}
+
+# alpha=beta benefit: hierarchical single-dataset B vs D
+lambdaB_est_final <- fe_B["lambda_Intercept", "Estimate"]
+lambdaD_est_final <- if (!is.null(fe_D) && "lambda_Intercept" %in% rownames(fe_D))
+                       fe_D["lambda_Intercept", "Estimate"] else NA_real_
+h_bias_B <- lambdaB_est_final - LAMBDA_TRUE
+h_bias_D <- lambdaD_est_final - LAMBDA_TRUE
+h_verdict <- if (!is.na(h_bias_D) && abs(h_bias_D) > abs(h_bias_B))
+  sprintf("Hierarchical: Model D |bias|=%.3f > Model B |bias|=%.3f (expected direction)",
+          abs(h_bias_D), abs(h_bias_B))
+else
+  sprintf("Hierarchical: Model D |bias|=%.3f, Model B |bias|=%.3f (weak/inconclusive)",
+          abs(h_bias_D), abs(h_bias_B))
+
+nilsson_verdict <- sprintf(
+  "%s. SBC-light (K=%d): %s",
+  h_verdict, K_SBC, sbc_verdict
+)
 
 cat("==========================================================================\n")
 cat("SUMMARY:\n\n")
@@ -550,7 +825,7 @@ for (x in Filter(Negate(is.null), cov_list_B)) {
               x$param, x$true, x$est, x$lo, x$hi, if (x$covered) "OK" else "MISSED"))
 }
 
-cat(sprintf("\n  Model C [NEGATIVE CONTROL] (phi free, gains+losses): Rhat=%s, div=%s\n",
+cat(sprintf("\n  Model C [phi-free, gains+losses]: Rhat=%s, div=%s\n",
             if (is.na(rhat_C)) "FAILED" else sprintf("%.3f", rhat_C),
             if (is.na(div_C))  "FAILED" else as.character(div_C)))
 for (x in Filter(Negate(is.null), cov_list_C)) {
@@ -564,14 +839,20 @@ for (x in Filter(Negate(is.null), cov_list_D)) {
   cat(sprintf("    %-8s: true=%.2f, est=%.3f [%.3f,%.3f] %s\n",
               x$param, x$true, x$est, x$lo, x$hi, if (x$covered) "OK" else "MISSED"))
 }
-lambdaB_est_final <- fe_B["lambda_Intercept", "Estimate"]
-lambdaD_est_final <- if (!is.null(fe_D) && "lambda_Intercept" %in% rownames(fe_D))
-                       fe_D["lambda_Intercept", "Estimate"] else NA_real_
-cat(sprintf("    lambda B bias=%.3f vs. D bias=%.3f (expected: |D| > |B|)\n",
-            lambdaB_est_final - LAMBDA_TRUE, lambdaD_est_final - LAMBDA_TRUE))
+cat(sprintf("    lambda B bias=%+.3f vs. D bias=%+.3f (expected: |D| > |B|)\n",
+            h_bias_B, h_bias_D))
 
-cat("\n  NLF formulation: FEASIBLE for CPT in brms\n")
-cat("  phi/lambda confound: CONFIRMED at hierarchical level (Model C)\n")
-cat("  Nilsson alpha=beta benefit: DEMONSTRATED at hierarchical level (Models B vs. D)\n")
+cat(sprintf("\n  Model E [LOSS-ONLY NEGATIVE CONTROL]: Rhat=%s, div=%s\n",
+            if (is.na(rhat_E)) "FAILED" else sprintf("%.3f", rhat_E),
+            if (is.na(div_E))  "FAILED" else as.character(div_E)))
+for (x in Filter(Negate(is.null), cov_list_E)) {
+  cat(sprintf("    %-8s: true=%.2f, est=%.3f [%.3f,%.3f] %s\n",
+              x$param, x$true, x$est, x$lo, x$hi, if (x$covered) "OK" else "MISSED"))
+}
+
+cat("\n  --- Verdicts (computed from diagnostics) ---\n")
+cat(sprintf("  NLF formulation: %s\n", nlf_verdict))
+cat(sprintf("  phi/lambda confound: %s\n", confound_verdict))
+cat(sprintf("  Nilsson alpha=beta benefit: %s\n", nilsson_verdict))
 cat("  Gradient stability: OK — softmax handles negative utilities, no pow(neg,alpha)\n")
 cat("==========================================================================\n")

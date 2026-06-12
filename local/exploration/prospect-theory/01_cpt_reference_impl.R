@@ -105,9 +105,9 @@ cpt_loglik <- function(params, data,
   gamma_w <- params["gamma_w"]
   phi     <- params["phi"]
 
-  U_A <- cpt_utility_1outcome(data$x_A, data$p_A, alpha, beta, lambda,
+  U_A <- cpt_utility_1outcome(data$amt_A, data$prob_A, alpha, beta, lambda,
                                 gamma_w, weighting_fn)
-  U_B <- cpt_utility_1outcome(data$x_B, data$p_B, alpha, beta, lambda,
+  U_B <- cpt_utility_1outcome(data$amt_B, data$prob_B, alpha, beta, lambda,
                                 gamma_w, weighting_fn)
 
   p_choose_A <- cpt_choice_prob(U_A, U_B, phi)
@@ -185,8 +185,8 @@ U_B_gains <- cpt_utility_1outcome(x_B_gains, p_B_gains, ALPHA_TRUE, BETA_TRUE,
 set.seed(123L)
 choices_gains <- rbinom(N_TRIALS, 1L, cpt_choice_prob(U_A_gains, U_B_gains, PHI_TRUE))
 
-d_gains <- data.frame(x_A = x_A_gains, p_A = p_A_gains,
-                       x_B = x_B_gains, p_B = p_B_gains,
+d_gains <- data.frame(amt_A = x_A_gains, prob_A = p_A_gains,
+                       amt_B = x_B_gains, prob_B = p_B_gains,
                        choice = choices_gains)
 
 cat(sprintf("Simulated %d gains-only trials, P(A) = %.3f\n", N_TRIALS, mean(choices_gains)))
@@ -292,8 +292,8 @@ set.seed(456L)
 choices_all <- rbinom(N_MIXED, 1L, cpt_choice_prob(U_A_all, U_B_all, PHI_TRUE))
 
 d_mixed <- data.frame(
-  x_A    = x_A_all,   p_A = p_A_all,
-  x_B    = x_B_all,   p_B = p_B_all,
+  amt_A  = x_A_all,   prob_A = p_A_all,
+  amt_B  = x_B_all,   prob_B = p_B_all,
   choice = choices_all,
   domain = domain
 )
@@ -438,14 +438,15 @@ cat("  Row = one trial (binary choice)\n")
 cat("  Columns:\n")
 cat("    subj:     participant ID\n")
 cat("    trial:    trial number (optional)\n")
-cat("    x_A:      outcome of option A (can be negative for losses)\n")
-cat("    p_A:      probability of outcome x_A in option A\n")
-cat("    x_B:      outcome of option B (can be negative for losses)\n")
-cat("    p_B:      probability of outcome x_B in option B\n")
+cat("    amt_A:    outcome of option A (can be negative for losses)\n")
+cat("    prob_A:   probability of outcome amt_A in option A\n")
+cat("    amt_B:    outcome of option B (can be negative for losses)\n")
+cat("    prob_B:   probability of outcome amt_B in option B\n")
 cat("    choice:   1 if chose A, 0 if chose B\n\n")
 
-cat("For two-outcome lotteries (e.g., x_A1 with p_A1, x_A2 with 1-p_A1):\n")
-cat("    x_A1, p_A1, x_A2, x_B1, p_B1, x_B2  (p_A2 = 1 - p_A1, p_B2 = 1 - p_B1)\n\n")
+cat("For two-outcome lotteries (e.g., amt_A1 with prob_A1, amt_A2 with 1-prob_A1):\n")
+cat("    amt_A1, prob_A1, amt_A2, amt_B1, prob_B1, amt_B2\n")
+cat("    (prob_A2 = 1 - prob_A1, prob_B2 = 1 - prob_B1)\n\n")
 
 cat("Example data rows (first 6 trials from gains-only design):\n")
 print(head(d_gains, 6))
@@ -512,7 +513,7 @@ cat(sprintf("  Nilsson lambda bias (unconstrained): %.3f\n",
             fit_unconstrained$par[3] - LAMBDA_TRUE))
 cat(sprintf("  Nilsson lambda bias (alpha=beta):   %.3f\n",
             fit_constrained$par[2]   - LAMBDA_TRUE))
-cat("\n  DATA FORMAT: wide per-option attributes (x_A, p_A, x_B, p_B, choice)\n")
+cat("\n  DATA FORMAT: wide per-option attributes (amt_A, prob_A, amt_B, prob_B, choice)\n")
 cat("  CONCLUSION: CPT R reference implementation validated.\n")
 cat("              lambda is only identified with gains + losses in the same design.\n")
 cat("              alpha=beta constraint reduces bias in lambda recovery.\n")

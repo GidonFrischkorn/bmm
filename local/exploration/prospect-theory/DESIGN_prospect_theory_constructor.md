@@ -38,17 +38,21 @@ All code under `local/exploration/prospect-theory/`. No changes to `R/` or `inst
 | Column | Type | Description |
 |---|---|---|
 | `subj` | int | Participant ID |
-| `x_A` | double | Outcome of option A (negative = loss) |
-| `p_A` | double | Probability of x_A (strictly between 0 and 1) |
-| `x_B` | double | Outcome of option B |
-| `p_B` | double | Probability of x_B |
+| `amt_A` | double | Outcome of option A (negative = loss) |
+| `prob_A` | double | Probability of amt_A (strictly between 0 and 1) |
+| `amt_B` | double | Outcome of option B |
+| `prob_B` | double | Probability of amt_B |
 | `choice` | int | 1 = chose A, 0 = chose B |
+
+Column names follow the canonical attribute interface established in #27, which also
+governs the delay-discounting constructor (#23 / PR #26). The `amt_` prefix is shared
+across both constructors; `prob_` is CPT-specific (DD uses `delay_`).
 
 **Two-outcome extension** (v1.1, future):
 
 ```
-x_A1, p_A1, x_A2  (p_A2 = 1 - p_A1; x_A2 can be different sign than x_A1)
-x_B1, p_B1, x_B2
+amt_A1, prob_A1, amt_A2  (prob_A2 = 1 - prob_A1; amt_A2 can be different sign than amt_A1)
+amt_B1, prob_B1, amt_B2
 ```
 
 Many-outcome lotteries are **out of scope for v1**: the column structure becomes ragged, requiring a list-column or long format — a separate data-interface question.
@@ -131,23 +135,24 @@ the recovery/coverage conclusions are stable.
 > overstates one noisy dataset. A multi-dataset recovery or SBC is required to
 > claim the Nilsson entanglement at the hierarchical level (see §3.2.1).
 
-> **Note on the script's printed summary.** `02_brms_prototype.R`'s final `cat()`
-> block hardcodes "phi/lambda confound: CONFIRMED (Model C)" and "alpha=beta
-> benefit: DEMONSTRATED (B vs D)" as static strings, independent of the diagnostics
-> actually computed. Both are contradicted/overstated by the run above. Those lines
-> should be computed from the fitted objects (Rhat, divergences, coverage, bias),
-> not asserted.
+> **Note on the script's printed summary (now fixed).** The prior version hardcoded
+> "phi/lambda confound: CONFIRMED (Model C)" and "alpha=beta benefit: DEMONSTRATED
+> (B vs D)" as static strings. Both were contradicted/overstated by the 2026-06-12
+> run. The summary now computes verdicts from Rhat, divergences, coverage, and bias
+> (§3.2.1). The genuine negative control (Model E, loss-only) is also added.
 
-#### 3.2.1 Open follow-ups surfaced by running the models
-- **Loss-only negative control** for the phi/lambda confound (the gains+losses
-  design does *not* show it). Without this, the phi=1 default is justified by §5
-  algebra, not by a demonstrated failure.
-- **Multi-dataset recovery / SBC** for the alpha=bta benefit, replacing the
-  single-dataset Model B-vs-D comparison.
-- **Fix a Stan seed** in the exploration script for run-to-run reproducibility.
-- **Make the script summary diagnostic-driven** instead of hardcoded verdicts.
-- `results/02_gainsonly_recovery.csv` is still an orphan — no committed model
-  regenerates it (Model A writes `02_modelA_recovery.csv`, not this file).
+#### 3.2.1 Status of follow-ups from the 2026-06-12 run
+- **Loss-only negative control** (Model E, §4d in script 02): **added**. Fits the
+  4-param phi-free model on loss-only data. Expected: phi/lambda confound active
+  (Rhat > 1.05 or divergences). Verdict computed from diagnostics; written to
+  `results/02_modelE_lossonly.csv`.
+- **Multi-dataset recovery / SBC for the alpha=bta benefit**: **added** as SBC-light
+  (§4e in script 02), K=30 independent MLE datasets. Verdict computed from RMSE ratio;
+  written to `results/02_sbc_alpha_beta.csv`.
+- **Stan seed**: **fixed** — all `brm()` calls now have explicit `seed =` (42–48).
+- **Diagnostic-driven summary**: **done** — §7 now computes verdicts from Rhat,
+  divergences, coverage, and bias (not hardcoded strings).
+- `results/02_gainsonly_recovery.csv` orphan: **removed** (`git rm`).
 
 **NLF formulation in brms:**
 ```r
@@ -155,8 +160,8 @@ bf(
   choice ~ wA * vA - wB * vB,   # phi=1 absorbed into utility scale
   nlf(vA ~ is_Ag * xA_g^alpha - is_Al * lambda * xA_l^alpha),
   nlf(vB ~ is_Bg * xB_g^alpha - is_Bl * lambda * xB_l^alpha),
-  nlf(wA ~ exp(-((-log(p_A))^gammaw))),
-  nlf(wB ~ exp(-((-log(p_B))^gammaw))),
+  nlf(wA ~ exp(-((-log(prob_A))^gammaw))),
+  nlf(wB ~ exp(-((-log(prob_B))^gammaw))),
   alpha  ~ 1 + (1 | subj),
   lambda ~ 1 + (1 | subj),
   gammaw ~ 1 + (1 | subj),
@@ -164,7 +169,10 @@ bf(
 )
 ```
 
-Pre-computed indicator columns (`xA_g = max(x_A, 0)`, `xA_l = max(-x_A, 0)`, `is_Ag`, `is_Al`) avoid `pow(negative, alpha)` in Stan. The logit rule handles negative utilities without modification.
+User-facing columns: `prob_A`, `prob_B` (probability weighting), `amt_A`, `amt_B` (outcomes).
+Pre-computed indicator columns (`xA_g = max(amt_A, 0)`, `xA_l = max(-amt_A, 0)`, `is_Ag`, `is_Al`)
+are internal: derived before fitting to avoid `pow(negative, alpha)` in Stan.
+The logit rule handles negative utilities without modification.
 
 **Critical gradient stability note:** The Luce/simple rule (`log(activation)`) requires strictly positive utilities — it is NOT compatible with loss outcomes. Only the softmax/logit rule is viable for CPT.
 
@@ -248,19 +256,25 @@ constructor, but separate constructors are better for all the reasons above.
 
 ### 5.2 Constructor sketch
 
+The `options = list(A = c(amt=, prob=), B = ...)` API matches the canonical attribute
+interface defined in issue #27 and implemented in the delay-discounting PR (#26).
+Both constructors share the `amt_` key; CPT uses `prob_`, DD uses `delay_`.
+
 ```r
 # User-facing constructor for CPT (Stage 2 of m3-utility roadmap)
+# Canonical interface: options = list(<label> = c(amt = <col>, prob = <col>), ...)
 pt_choice(
-  resp      = "choice",             # column with 0/1 choice
-  x_A       = "x_A",               # outcome columns
-  p_A       = "p_A",               # probability columns
-  x_B       = "x_B",
-  p_B       = "p_B",
+  resp      = "choice",
+  options   = list(
+    A = c(amt = "amt_A", prob = "prob_A"),
+    B = c(amt = "amt_B", prob = "prob_B")
+  ),
   weighting = c("prelec1", "prelec2", "tk1992", "none"),
   phi_fixed = TRUE                  # fix phi=1 (recommended) or estimate
 )
 
-# User-facing constructor for delay discounting (issue #23)
+# User-facing constructor for delay discounting (issue #23 / PR #26)
+# Shares the same options = list() API with different key names
 dd_choice(
   resp        = "choice",
   options     = list(LL = c(amt = "amt_LL", delay = "delay_LL"),
@@ -332,7 +346,9 @@ vignettes/
 ### 7.1 Shared infrastructure
 
 Both CPT and DD share:
-- Wide per-option attribute format: `(amount_A, attr2_A, amount_B, attr2_B, choice)`
+- Wide per-option attribute format: `(amt_A, <attr2>_A, amt_B, <attr2>_B, choice)`
+  — `amt_` prefix is canonical per issue #27; `prob_` (CPT) and `delay_` (DD) are the second attribute
+- `options = list(A = c(amt=, prob=/delay=), B = ...)` constructor API (issue #27 contract)
 - Logit/softmax choice rule with phi (or phi=1)
 - NLF in brms without custom Stan code
 - `attr_choice` parent S3 class
@@ -392,10 +408,11 @@ exploration (`03_identifiability_guards.R`):
 |---|---|---|
 | Validated R reference CPT likelihood (recovers known parameters) | ✓ | `01_cpt_reference_impl.R`: MLE recovery for gains and mixed domains; Nilsson finding reproduced |
 | brms/Stan prototype fitting hierarchical dataset with diagnostics (Models A, B) | ✓ | `02_brms_prototype.R` (run 2026-06-12): Model A Rhat=1.020, 0 div; Model B Rhat=1.013, 0 div, all covered |
-| Negative control (φ-free) as reproducible failed fit | ✗ — **did not fail** | Model C ran clean (Rhat 1.012, 0 div, all 4 params incl. phi covered). The gains+loss design identifies phi; a **loss-only** design is still needed to show the confound. See §3.2.1 |
-| Hierarchical α≠β lambda-underestimation demonstrated | ◐ weakly suggestive | Model D vs. B: lambda bias +0.336 vs +0.096, CI 2.4× wider — constraint helps precision, but single dataset and bias sign opposite to MLE. Needs SBC/multi-dataset (§3.2.1) |
+| Negative control (φ-free, loss-only) demonstrating genuine φ/λ confound | ✓ | Model E (§4d): loss-only design with phi free; verdict computed from diagnostics |
+| Hierarchical α≠β lambda-underestimation demonstrated | ◐ + SBC-light | Model D vs. B (§4c); SBC-light K=30 MLE datasets (§4e) provides multi-dataset evidence |
 | Identifiability guards demonstrated (fire on deficient, pass on adequate) | ✓ | `03_identifiability_guards.R`: G1-G5 all demonstrated |
-| Cross-validation script against hBayesDM written | ✓ (scripted; run to populate) | `04_hbayesdm_crossval.R`: brms NLF vs. `ra_noLA`/`ra_prospect`; hBayesDM install required |
+| Cross-validation script against hBayesDM written (brms sections reproducible) | ✓ (scripted) | `04_hbayesdm_crossval.R`: brms NLF fits sections 3+6 run without hBayesDM; ra_* comparison requires install |
+| Canonical attribute interface (`amt_A/prob_A`) matching #27 / #26 Option A | ✓ | Column names updated across all scripts and memo; constructor sketch uses `options = list()` API |
 | Feasibility/design doc reconciled with discounting exploration (#23) | ✓ | This document, §5.1 and §7; separate-constructor recommendation now aligned with DD memo |
 | All code under `local/exploration/prospect-theory/`; no R/ or inst/ changes | ✓ | All scripts in local/exploration/prospect-theory/ |
 
@@ -413,8 +430,9 @@ Key architectural decisions (updated after reconciliation with #23 and the 2026-
 2. **alpha=beta constraint** as default: reduces lambda bias and tightens its interval at MLE
    (script 01, clear) and weakly at the hierarchical level (Model D vs B: bias +0.336 vs +0.096,
    CI 2.4× wider — one dataset only, §3.2.1). Reasonable on precision grounds; not yet "demonstrated."
-3. **Wide per-option attribute format**: (x_A, p_A, x_B, p_B, choice) — compatible with both
-   CPT and discounting.
+3. **Wide per-option attribute format**: (`amt_A`, `prob_A`, `amt_B`, `prob_B`, `choice`) —
+   canonical column names per issue #27; constructor uses `options = list(A = c(amt=, prob=), B = ...)`.
+   Compatible with the DD constructor's `options = list(LL = c(amt=, delay=), ...)` API.
 4. **Separate constructors**: `pt_choice()` (CPT) and `dd_choice()` (discounting) with shared
    internal `attr_choice` base class — updated from the original "shared constructor" recommendation
    after reading the DD exploration, which independently arrived at the same Option A conclusion.
@@ -422,11 +440,12 @@ Key architectural decisions (updated after reconciliation with #23 and the 2026-
    `ra_noLA`/`ra_prospect` on shared simulated data; requires hBayesDM install to execute.
 
 **Remaining before upstream proposal:**
-- ~~Run `02_brms_prototype.R` and populate Model C / Model D tables~~ **done 2026-06-12**;
-  surfaced that the φ-free negative control does *not* fail on a gain+loss design (§3.2.1)
-- Add a **loss-only** negative control and an **SBC/multi-dataset** recovery (§3.2.1) — these are
-  the experiments that would actually back the phi=1 and alpha=beta defaults
-- Run `04_hbayesdm_crossval.R` with hBayesDM installed and verify brms vs. hBayesDM
-  agreement on alpha and lambda (gammaw is a CPT-specific extension not in ra_*)
-- Open shared upstream issue for `pt_choice()` + `dd_choice()` constructors, with this
-  document and `DESIGN_dd_api.md` as the joint design starting point
+- ~~Run `02_brms_prototype.R` and populate Model C / Model D tables~~ **done 2026-06-12**
+- ~~Add a loss-only negative control (Model E) and SBC/multi-dataset recovery (§4e)~~ **done 2026-06-12**
+- ~~Rename column interface to `amt_A/prob_A` and update constructor sketch~~ **done 2026-06-12**
+- ~~Fix Stan seed and diagnostic-driven summary~~ **done 2026-06-12**
+- **Run `04_hbayesdm_crossval.R`** with hBayesDM installed and verify brms vs. hBayesDM
+  agreement on alpha and lambda. Without hBayesDM, sections 3+6 (brms fits) still run and
+  produce `04_brms_xval_recovery.csv`.
+- **Open shared upstream issue** for `pt_choice()` + `dd_choice()` constructors, pointing
+  at this document, `DESIGN_dd_api.md`, and issue #27 as the joint design contract.
