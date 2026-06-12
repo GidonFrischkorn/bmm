@@ -1,0 +1,5 @@
+"model","param","true","est","q2.5","q97.5","covered","max_rhat","n_diverge"
+"gains_losses_alpha_neq_bta","alpha",0.8,0.79823034312,0.74224023725,0.85557369575,TRUE,1.01974248189074,0
+"gains_losses_alpha_neq_bta","bta",0.8,0.75699217807,0.6535299365,0.87345722725,TRUE,1.01974248189074,0
+"gains_losses_alpha_neq_bta","lambda",2.25,2.5857436017,1.796488595,3.48352765,TRUE,1.01974248189074,0
+"gains_losses_alpha_neq_bta","gammaw",0.65,0.59704574865,0.49121765875,0.73531590975,TRUE,1.01974248189074,0

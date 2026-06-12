@@ -71,48 +71,83 @@ Many-outcome lotteries are **out of scope for v1**: the column structure becomes
 
 ### 3.2 brms/Stan Prototype (02_brms_prototype.R)
 
-Four hierarchical models (N=30 subjects × 40–80 trials, 2 chains × 1000 iter):
+Four hierarchical models (N=30 subjects × 40–80 trials, 2 chains × 1000 iter).
+**Numbers below are measured from an actual run (2026-06-12), not predictions.**
+The Stan seed is not fixed, so estimates vary at the ~±0.02 level run-to-run;
+the recovery/coverage conclusions are stable.
 
 **Model A — Gains-only (alpha, gammaw, phi):**
-- max Rhat = 1.026, divergences = 0, min ESS = 88
-- alpha: true=0.80, est=0.908 [0.726, 1.101] COVERED
-- gammaw: true=0.65, est=0.588 [0.425, 0.804] COVERED
-- phi: true=1.20, est=0.973 [0.539, 1.574] COVERED
+- max Rhat = 1.020, divergences = 0
+- alpha: true=0.80, est=0.904 [0.708, 1.124] COVERED
+- gammaw: true=0.65, est=0.586 [0.420, 0.823] COVERED
+- phi: true=1.20, est=0.985 [0.534, 1.642] COVERED
 
 **Model B — Gains+losses, phi=1 fixed, alpha=beta (alpha, lambda, gammaw):**
-- max Rhat = 1.012, divergences = 0, min ESS = 153
-- alpha: true=0.80, est=0.788 [0.742, 0.831] COVERED
-- lambda: true=2.25, est=2.331 [1.959, 2.731] COVERED
-- gammaw: true=0.65, est=0.621 [0.529, 0.725] COVERED
+- max Rhat = 1.013, divergences = 0
+- alpha: true=0.80, est=0.788 [0.744, 0.836] COVERED
+- lambda: true=2.25, est=2.346 [1.995, 2.705] COVERED  (bias +0.096)
+- gammaw: true=0.65, est=0.623 [0.532, 0.720] COVERED
 
-**Model C — NEGATIVE CONTROL: phi free, gains+losses, alpha=beta (alpha, lambda, gammaw, phi):**
-> This model is the *naïve* four-parameter fit—adding phi as a free hierarchical
-> parameter to the same gains+losses data as Model B (DGP phi=1). Expected
-> result: Rhat >> 1.05, many divergences, alpha not covered, phi and lambda
-> posteriors wide and anti-correlated. This is the strongest empirical evidence
-> for the phi=1 default; without this negative control, the phi=1 recommendation
-> was only theoretical (Nilsson 2011 MLE in script 01). Results written to
-> `results/02_cpt_recovery.csv`. **Run `02_brms_prototype.R` to populate.**
-- max Rhat = [run script] (expected >> 1.05), divergences = [run] (expected >> 50)
-- alpha: expected NOT COVERED (alpha→1.06 was observed in a previous session)
-- lambda: expected low estimate (phi compensation pulls lambda toward 1)
-- phi: expected inflated estimate (compensates for lower lambda)
+**Model C — "negative control": phi free, gains+losses, alpha=beta (alpha, lambda, gammaw, phi):**
+- max Rhat = 1.012, divergences = 0
+- alpha: true=0.80, est=0.745 [0.634, 0.855] COVERED
+- lambda: true=2.25, est=2.275 [1.918, 2.703] COVERED
+- gammaw: true=0.65, est=0.579 [0.454, 0.708] COVERED
+- phi: true=1.20, est=1.206 [0.822, 1.740] **COVERED**
 
-**Model D — Hierarchical Nilsson: phi=1 fixed, alpha≠bta (alpha, bta, lambda, gammaw):**
-> This is the hierarchical Bayesian analogue of the MLE Nilsson (2011) finding
-> from script 01. Data DGP has alpha=beta=0.80, so any lambda underestimation
-> is attributable solely to the freed alpha≠bta. Expected: lambda estimate
-> lower than Model B's (larger negative bias), alpha and bta diverge slightly,
-> gammaw similar. Results written to `results/02_modelD_recovery.csv`.
-> **Run `02_brms_prototype.R` to populate.**
-- max Rhat = [run script] (expected: mildly elevated, 1.02–1.05)
-- lambda: expected underestimated (compare with Model B bias = +0.08)
-- alpha, bta: expected near true=0.80 but with wider intervals than Model B
+> ⚠️ **Result contradicts the prior prediction.** This model was expected to fail
+> (Rhat ≫ 1.05, many divergences, phi/lambda anti-correlated) and to be "the
+> strongest empirical evidence for the phi=1 default." It did **not** fail: it
+> converged cleanly (Rhat 1.012, 0 divergences) and recovered **all four**
+> parameters, including phi (1.206 vs. true 1.20). So in a **balanced gain+loss
+> design, phi is identifiable and fixing phi=1 is a convenience/robustness choice,
+> not an identification requirement.** This is consistent with §5 of the script
+> itself: gain-vs-gain trials identify phi, loss-vs-loss trials identify phi·lambda,
+> so the combination pins both. The catastrophic confound (the old orphan
+> `02_cpt_recovery.csv`: Rhat 2.24, 501 divergences, alpha not covered) was a
+> **loss-only / different-DGP artifact** that the current reproducible script does
+> not generate. **To demonstrate the confound as a genuine negative control, the
+> script needs a loss-ONLY design — that experiment is still missing (see §3.2.1).**
 
-**Nilsson hierarchical comparison (expected, to be confirmed by running script):**
-- Model B (phi=1, alpha=bta):  lambda bias ≈ +0.08  (est=2.33, true=2.25)
-- Model D (phi=1, alpha≠bta): lambda bias ≈ **more negative** (Nilsson entanglement)
-- This comparison provides the Bayesian backbone for the alpha=bta default.
+**Model D — Hierarchical Nilsson: phi=1 fixed, alpha≠bta free (alpha, bta, lambda, gammaw):**
+- max Rhat = 1.020, divergences = 0
+- alpha: true=0.80, est=0.798 [0.742, 0.856] COVERED
+- bta:   true=0.80, est=0.757 [0.654, 0.873] COVERED
+- lambda: true=2.25, est=2.586 [1.796, 3.484] COVERED  (bias +0.336)
+- gammaw: true=0.65, est=0.597 [0.491, 0.735] COVERED
+
+**Nilsson hierarchical comparison (measured):**
+- Model B (phi=1, alpha=bta):  lambda bias = **+0.096**, 95% CI width 0.71
+- Model D (phi=1, alpha≠bta):  lambda bias = **+0.336**, 95% CI width 1.69 (≈2.4× wider)
+
+> **Honest read: weakly suggestive, not "demonstrated."** Freeing alpha≠bta does
+> degrade lambda — larger bias and a much wider interval — so the alpha=bta
+> *constraint* buys precision, in the expected direction. But (a) the bias here is
+> *positive* (over-estimation), whereas the Nilsson/script-01 MLE finding is
+> *under*-estimation (bias −1.39), so the hierarchical effect does not reproduce
+> the MLE sign; (b) this rests on a **single simulated dataset**, where ±0.3 in a
+> wide-CI parameter is within noise. The alpha=bta default is reasonable on
+> precision grounds, but calling it "demonstrated at the hierarchical level"
+> overstates one noisy dataset. A multi-dataset recovery or SBC is required to
+> claim the Nilsson entanglement at the hierarchical level (see §3.2.1).
+
+> **Note on the script's printed summary.** `02_brms_prototype.R`'s final `cat()`
+> block hardcodes "phi/lambda confound: CONFIRMED (Model C)" and "alpha=beta
+> benefit: DEMONSTRATED (B vs D)" as static strings, independent of the diagnostics
+> actually computed. Both are contradicted/overstated by the run above. Those lines
+> should be computed from the fitted objects (Rhat, divergences, coverage, bias),
+> not asserted.
+
+#### 3.2.1 Open follow-ups surfaced by running the models
+- **Loss-only negative control** for the phi/lambda confound (the gains+losses
+  design does *not* show it). Without this, the phi=1 default is justified by §5
+  algebra, not by a demonstrated failure.
+- **Multi-dataset recovery / SBC** for the alpha=bta benefit, replacing the
+  single-dataset Model B-vs-D comparison.
+- **Fix a Stan seed** in the exploration script for run-to-run reproducibility.
+- **Make the script summary diagnostic-driven** instead of hardcoded verdicts.
+- `results/02_gainsonly_recovery.csv` is still an orphan — no committed model
+  regenerates it (Model A writes `02_modelA_recovery.csv`, not this file).
 
 **NLF formulation in brms:**
 ```r
@@ -356,9 +391,9 @@ exploration (`03_identifiability_guards.R`):
 | Criterion | Status | Evidence |
 |---|---|---|
 | Validated R reference CPT likelihood (recovers known parameters) | ✓ | `01_cpt_reference_impl.R`: MLE recovery for gains and mixed domains; Nilsson finding reproduced |
-| brms/Stan prototype fitting hierarchical dataset with diagnostics (Models A, B) | ✓ | `02_brms_prototype.R`: Model A Rhat=1.026, 0 div; Model B Rhat=1.012, 0 div |
-| Negative control (φ-free) as reproducible failed fit | ✓ (scripted; run to populate) | `02_brms_prototype.R` §4b: Model C writes `02_cpt_recovery.csv` |
-| Hierarchical α≠β lambda-underestimation demonstrated | ✓ (scripted; run to populate) | `02_brms_prototype.R` §4c: Model D vs. Model B comparison |
+| brms/Stan prototype fitting hierarchical dataset with diagnostics (Models A, B) | ✓ | `02_brms_prototype.R` (run 2026-06-12): Model A Rhat=1.020, 0 div; Model B Rhat=1.013, 0 div, all covered |
+| Negative control (φ-free) as reproducible failed fit | ✗ — **did not fail** | Model C ran clean (Rhat 1.012, 0 div, all 4 params incl. phi covered). The gains+loss design identifies phi; a **loss-only** design is still needed to show the confound. See §3.2.1 |
+| Hierarchical α≠β lambda-underestimation demonstrated | ◐ weakly suggestive | Model D vs. B: lambda bias +0.336 vs +0.096, CI 2.4× wider — constraint helps precision, but single dataset and bias sign opposite to MLE. Needs SBC/multi-dataset (§3.2.1) |
 | Identifiability guards demonstrated (fire on deficient, pass on adequate) | ✓ | `03_identifiability_guards.R`: G1-G5 all demonstrated |
 | Cross-validation script against hBayesDM written | ✓ (scripted; run to populate) | `04_hbayesdm_crossval.R`: brms NLF vs. `ra_noLA`/`ra_prospect`; hBayesDM install required |
 | Feasibility/design doc reconciled with discounting exploration (#23) | ✓ | This document, §5.1 and §7; separate-constructor recommendation now aligned with DD memo |
@@ -370,11 +405,14 @@ exploration (`03_identifiability_guards.R`):
 
 **CPT is feasible as a first-class bmm constructor** via brms NLF with bernoulli+logit family.
 
-Key architectural decisions (updated after reconciliation with #23):
-1. **phi=1 (fixed)** as default: avoids the phi/lambda confound; supported by Model C negative
-   control at the hierarchical level (script 02, §4b). User can override with informative prior.
-2. **alpha=beta constraint** as default: reduces lambda bias (Nilsson 2011); demonstrated at MLE
-   (script 01) and now also scripted for the hierarchical level (Model D, script 02 §4c).
+Key architectural decisions (updated after reconciliation with #23 and the 2026-06-12 run):
+1. **phi=1 (fixed)** as a *robustness/convenience* default — **not** an identification
+   requirement in a balanced gain+loss design. The run showed phi is recoverable when free
+   (Model C: phi est=1.206 vs true=1.20, clean diagnostics). The confound only bites in a
+   loss-only design (§5 algebra; loss-only demonstration still TODO, §3.2.1). User can free phi.
+2. **alpha=beta constraint** as default: reduces lambda bias and tightens its interval at MLE
+   (script 01, clear) and weakly at the hierarchical level (Model D vs B: bias +0.336 vs +0.096,
+   CI 2.4× wider — one dataset only, §3.2.1). Reasonable on precision grounds; not yet "demonstrated."
 3. **Wide per-option attribute format**: (x_A, p_A, x_B, p_B, choice) — compatible with both
    CPT and discounting.
 4. **Separate constructors**: `pt_choice()` (CPT) and `dd_choice()` (discounting) with shared
@@ -384,7 +422,10 @@ Key architectural decisions (updated after reconciliation with #23):
    `ra_noLA`/`ra_prospect` on shared simulated data; requires hBayesDM install to execute.
 
 **Remaining before upstream proposal:**
-- Run `02_brms_prototype.R` and populate Model C / Model D result tables above
+- ~~Run `02_brms_prototype.R` and populate Model C / Model D tables~~ **done 2026-06-12**;
+  surfaced that the φ-free negative control does *not* fail on a gain+loss design (§3.2.1)
+- Add a **loss-only** negative control and an **SBC/multi-dataset** recovery (§3.2.1) — these are
+  the experiments that would actually back the phi=1 and alpha=beta defaults
 - Run `04_hbayesdm_crossval.R` with hBayesDM installed and verify brms vs. hBayesDM
   agreement on alpha and lambda (gammaw is a CPT-specific extension not in ra_*)
 - Open shared upstream issue for `pt_choice()` + `dd_choice()` constructors, with this
