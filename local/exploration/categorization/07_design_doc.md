@@ -1,7 +1,7 @@
 # GCM / Prototype Categorization Models — Design & Feasibility Document
 
 **Issue**: #19  
-**Status**: Exploration complete — Phase 2b verified, ready for upstream `[new-model]` proposal  
+**Status**: Exploration complete — Phase 2b fully verified (incl. 06b LOO comparison), ready for upstream `[new-model]` proposal  
 **Date**: 2026-06-11  
 
 ---
@@ -139,6 +139,40 @@ without regularization.
 (stim 2, a category-B boundary stimulus, over-represented: w1=0.595) and
 higher in E7 (stim 7, another cat-B stimulus with extreme x1: w1=0.745).
 This is consistent with Nosofsky's (1984) attention optimization hypothesis.
+
+### 7. LOO model comparison and PRM rote-memory identification (06b_loo_comparison.R)
+
+Fits GCM, prototype, and PRM to nosof88 condition B (12 stimuli, K=2) with
+`is_old=TRUE` for all stimuli so PRM's rote-memory component (`p_mem`) is
+genuinely exercised. LOO is leave-one-cell-out (12 cells = 12 (stim × cat)
+count vectors per model); note this is coarser than per-trial LOO but valid
+for model comparison.
+
+**Phase 2b result (CmdStan 2.38, 4 chains × 1000 draws, 0 divergences, Rhat ≤ 1.008)**:
+
+| Model | ELPD_loo | SE |
+|---|---|---|
+| Prototype | −31.7 | 2.5 |
+| PRM | −32.5 | 3.2 |
+| GCM | −35.0 | 3.6 |
+
+Pairwise (GCM as reference): GCM vs Prototype ΔELPD = −3.4 (SE 3.8);
+GCM vs PRM ΔELPD = −2.6 (SE 2.8).
+
+**PRM rote-memory component**: p_mem = 0.140, 90% CI [0.020, 0.279] — CI
+excludes 0, confirming PRM ≠ prototype on this dataset. ✅
+
+**Interpretation**: the LOO ordering (Prototype > PRM > GCM) *inverts* the
+published GCM-best BIC ordering (GCM 39,952 / PRM 41,090 / prototype 45,304
+from Nosofsky et al. 2022), but all pairwise differences are within their
+standard errors (not significant). The inversion is expected: GCM carries
+a loosely-identified extra parameter (`gamma`, 90% CI [0.38, 2.28]) that
+`p_loo` penalises; the dataset is a single condition of 12 aggregate cells
+(not trial-level data); and the data were simulated from aggregate proportions
+rather than genuine trial sequences. Treat 06b as a **machinery demonstration**
+(PRM is identified, LOO pipeline runs correctly) rather than a model-selection
+result. A real comparison requires trial-level data (nosof94 or OSF rocks) on
+the trial scale.
 
 ---
 

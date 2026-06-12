@@ -255,7 +255,7 @@ model {
   p_mem    ~ beta(1, 1);  // uniform prior on rote-memory proportion
   for (s in 1:S) {
     vector[K] la = proto_log_act(D_proto[s], w, c, log_bias, K);
-    simplex[K] p = softmax(la);
+    vector[K] p = softmax(la);
     if (is_old[s]) {
       // Mix rote-memory (delta on correct category) with prototype
       p = (1 - p_mem) * p;
@@ -269,7 +269,7 @@ generated quantities {
   real      p_mem_out = p_mem;  // rename for clear output
   for (s in 1:S) {
     vector[K] la = proto_log_act(D_proto[s], w, c, log_bias, K);
-    simplex[K] p = softmax(la);
+    vector[K] p = softmax(la);
     if (is_old[s]) {
       p = (1 - p_mem) * p;
       p[true_cat[s]] += p_mem;
@@ -374,7 +374,7 @@ cat("  not one individual trial. LOO-IC values are on the cell scale.\n\n")
 
 extract_loo <- function(fit, label) {
   if (is.null(fit)) return(NULL)
-  ll_draws <- fit$draws("log_lik", format = "matrix")
+  ll_draws <- fit$draws("log_lik")
   loo_res  <- loo(ll_draws, r_eff = relative_eff(exp(ll_draws)))
   cat(sprintf("  %s: ELPD_loo=%.1f (SE=%.1f)  p_loo=%.1f  LOO-IC=%.1f\n",
               label,
