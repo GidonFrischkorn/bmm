@@ -135,13 +135,13 @@ The data layout is identical. The **valuation function** differs:
 
 **Verdict: the data interface _can_ be shared — column naming locked as
 canonical; base-class API signed off in #27 (attribute-based-choice interface
-contract). Shared-constructor criterion ✓.**
+contract); production base implemented in #28. Shared-constructor criterion ✓.**
 
 The column-naming convention (`amt_A/delay_A`, `amt_B/delay_B`) is canonical.
 #24 (prospect theory) has adopted `amt_A/prob_A` (dropped `x_A/p_A`), and
-`attr_choice()` (not user-facing) is the agreed internal base class — both
-confirmed via #27. Option A in §3.3 is the agreed approach, not merely a design
-direction.
+`attr_choice()` (not user-facing) is the agreed internal base class — contract
+signed off in #27, realised in #28. Option A in §3.3 is the agreed approach,
+not merely a design direction.
 
 ### 3.2 Choice rule asymmetry
 
@@ -183,9 +183,9 @@ pt_choice(
 
 Both constructors share an underlying `attr_choice()` base class
 (not user-facing) that handles the per-option attribute validation and
-the common check_data() logic (G1, G2). Production realization: #28 implements
-`attr_choice` as sign-agnostic (so `pt_choice` can inherit it), with the
-positive-amount check living in `check_data.dd_choice`.
+the common check_data() logic (G1, G2). Interface contract ratified in #27;
+production realization in #28: `attr_choice` is sign-agnostic (so `pt_choice`
+can inherit it), with the positive-amount check living in `check_data.dd_choice`.
 
 **Pros:** explicit API, no shared-function confusion, easy to extend;
 aligns with bmm's "one constructor = one response format" principle.
@@ -216,16 +216,22 @@ shared data interface but explicit API surface per domain.
 
 ## 4. Integration Path (production, after exploration)
 
-1. **`R/model_dd_choice.R`**: new `dd_choice()` constructor (S3 class
+**Delivered in #28.** The production `dd_choice()` constructor is implemented
+and does not block this exploration PR (disjoint files: `local/` vs `R/`).
+
+Key decisions from this exploration that landed in #28:
+
+1. **`R/model_dd_choice.R`**: `dd_choice()` constructor (S3 class
    `c("bmmodel", "choice", "dd_choice")`). Parameters: `logk`, `logphi`
    (or without phi for Luce rule).
 2. **`R/helpers-choice.R`**: `check_data.dd_choice()`, `configure_model.dd_choice()`.
-   Identifiability guards G1 and G2 live here.
+   G1 delay-range guard baked in; G2 screen folded into G1.
 3. **`inst/stan_chunks/`**: no custom Stan needed — brms `nlf()` generates
    the gradient-stable code automatically.
-4. **Priors**: `logk ~ Normal(-4, 1)` (k centre ≈ 0.018), `logphi ~ Normal(0.7, 0.3)`.
-5. **Prospect-theory sibling**: open a new issue referencing this memo once
-   the discounting constructor is merged.
+4. **Priors**: `logk ~ Normal(-4, 1)` (k centre ≈ 0.018), `logphi ~ Normal(0.7, 0.3)`;
+   hyperboloid `logs ~ Normal(0, 0.5)` s-prior from §2.1 identifiability note.
+5. **Prospect-theory sibling**: `pt_choice()` can inherit `attr_choice`; see #28
+   and #22.
 
 ---
 
@@ -268,5 +274,5 @@ From the issue:
 | Validated R reference likelihood, recovering known parameters across all four discount functions | ✓ | 01_reference_implementation.R: all |bias_logk| < 0.5; s/beta now reported; qh p(LL) fixed to 0.44 |
 | brms/Stan prototype fitting a small hierarchical dataset, with diagnostics reported | ✓ | 02_brms_prototype.R: R-hat=1.018, r=0.995 |
 | Identifiability guards demonstrated (delay-range guard; k-vs-sensitivity confound) | ✓ | 03_identifiability_guards.R: G1 ✓, G2 screen folded into G1 (fires iff G1 fires; value = φ-prior default), G3 ✓ |
-| Feasibility/design doc with explicit verdict on shared constructor | ✓ | Option A confirmed; `amt_A/delay_A` naming canonical; base-class API signed off in #27; production base implemented in #28 |
+| Feasibility/design doc with explicit verdict on shared constructor | ✓ | Option A confirmed; `amt_A/delay_A` naming canonical; #24 adopted `amt_A/prob_A`; base-class API signed off in #27; production base implemented in #28 |
 | All code under local/exploration/delay-discounting/; no R/ or inst/ changes | ✓ | Verified |
