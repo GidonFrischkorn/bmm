@@ -1,0 +1,3 @@
+"model","param","true","mean_bias","sd_bias","rmse","k_datasets"
+"constrained_alpha_eq_bta","lambda",2.25,2.2657333660503,4.73450674995482,5.17705676157368,30
+"unconstrained_alpha_neq_bta","lambda",2.25,3.81085695693877,7.34953030820807,8.1693149430746,30

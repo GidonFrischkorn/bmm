@@ -1,0 +1,4 @@
+"design","param","true_value","mle_estimate","abs_error","convergence"
+"gains_only","alpha",0.8,0.612134952378235,0.187865047621765,TRUE
+"gains_only","gamma_w",0.65,0.502421281079611,0.147578718920389,TRUE
+"gains_only","phi",1.5,2.67281740390078,1.17281740390078,TRUE

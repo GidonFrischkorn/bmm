@@ -1,0 +1,6 @@
+"design","param","true_value","mle_estimate","abs_error","convergence"
+"mixed_domain","alpha",0.8,0.514310998186608,0.285689001813392,TRUE
+"mixed_domain","beta",0.8,0.800977700560499,0.000977700560498507,TRUE
+"mixed_domain","lambda",2.25,0.85998462448296,1.39001537551704,TRUE
+"mixed_domain","gamma_w",0.65,0.630951013017867,0.0190489869821328,TRUE
+"mixed_domain","phi",1.5,3.04138960213508,1.54138960213508,TRUE
