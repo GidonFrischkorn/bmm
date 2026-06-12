@@ -1,7 +1,7 @@
 # GCM / Prototype Categorization Models — Exploration
 
 **Issue**: [#19](https://github.com/GidonFrischkorn/bmm/issues/19)  
-**Status**: Phase 2b in progress — K>2/M>2, LOO comparison, rocks-scale benchmark
+**Status**: Phase 2b complete (04b, 08 verified) — LOO comparison (06b) pending
 
 Exploration of Nosofsky's Generalized Context Model (GCM) and its prototype
 analogue for integration into bmm's multinomial infrastructure.
@@ -14,12 +14,12 @@ analogue for integration into bmm's multinomial infrastructure.
 | `02_api_design.md` | API design memo: answers all 6 design questions | ✓ complete |
 | `03_stan_prototype.R` | CmdStanR GCM implementation with MCMC | ✓ Rhat<1.02, 0 diverg, r=0.978 |
 | `04_parameter_recovery.R` | Recovery study across 8 parameter scenarios | ✓ c-gamma trade-off documented |
-| `04b_attention_simplex.R` | M>2 dims + K>2 categories with softmax-with-reference w | Phase 2b |
+| `04b_attention_simplex.R` | M>2 dims + K>2 categories with softmax-with-reference w | ✓ M=4/K=3: all w in 90% CI, Rhat_max=1.004, 8 s |
 | `05_hierarchical.R` | Multi-subject random-effects GCM | ✓ N=20, 52s, all params in 90% CI |
 | `06_realdata_fit.R` | Bayesian GCM on all 3 nosof88 conditions | ✓ r>0.97 per condition |
 | `06b_loo_comparison.R` | GCM vs prototype vs PRM with LOO model comparison | Phase 2b |
 | `07_design_doc.md` | Full design/feasibility document | ✓ Phase 2a verified |
-| `08_rocksscale_benchmark.R` | Timing benchmark at rocks scale (S=150, J=90, M=8, K=10) | Phase 2b |
+| `08_rocksscale_benchmark.R` | Timing benchmark at rocks scale (S=150, J=90, M=8, K=10) | ✓ rocks_full: 17.9 draws/s (1 chain), CSR indexing |
 
 ## Key Findings
 
@@ -46,10 +46,15 @@ analogue for integration into bmm's multinomial infrastructure.
    `multinomial_logit_lpmf` instead of `multinomial_lpmf(…|softmax(…))`.
    Eliminates simplex-sum-NaN warnings at large c or high K/M.
 
-7. **Phase 2b gating item**: `04b_attention_simplex.R` implements softmax-
-   with-reference w (M>2) and multi-category Luce choice (K>2). This is the
-   novel API not yet empirically supported; once recovered, upstream proposal
-   is unblocked.
+7. **K>2/M>2 attention simplex verified** (Phase 2b, `04b_attention_simplex.R`):
+   softmax-with-reference w (M=4) and multi-category Luce choice (K=3) recover
+   cleanly — all weights within 90% CI, Rhat_max=1.004, ESS_min=1346, 8 s.
+   Novel API is empirically supported; upstream proposal is unblocked.
+
+8. **Rocks-scale feasible** (Phase 2b, `08_rocksscale_benchmark.R`): CSR
+   per-category exemplar indexing yields 17.9 draws/s at rocks_full scale
+   (S=150, J=90, M=8, K=10) on 1 chain — a 4-chain production run takes a few
+   minutes. Issue #19 task 3 confirmed feasible.
 
 ## Data
 

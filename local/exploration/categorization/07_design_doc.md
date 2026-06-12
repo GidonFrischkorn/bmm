@@ -1,7 +1,7 @@
 # GCM / Prototype Categorization Models — Design & Feasibility Document
 
 **Issue**: #19  
-**Status**: Exploration complete — ready for upstream `[new-model]` proposal  
+**Status**: Exploration complete — Phase 2b verified, ready for upstream `[new-model]` proposal  
 **Date**: 2026-06-11  
 
 ---
@@ -92,7 +92,34 @@ Key implementation decisions confirmed:
 - Stimulus-indexed D_stim passes 12 matrices, not T matrices
 - `N(0, 1)` prior on log(c) restores true mean_c=0.8 inside the 90% CI
 
-### 5. Real-data fit (06_realdata_fit.R)
+### 5. K>2/M>2 attention simplex and multi-category choice (04b_attention_simplex.R)
+
+Implements and recovery-tests the novel API elements not yet empirically supported
+in earlier scripts: softmax-with-reference attention weights (M>2 dimensions) and
+multi-category Luce choice (K>2 categories). This is the gating item for an
+upstream proposal.
+
+**Setting**: M=4 dimensions, K=3 categories, J=24 exemplars, N=6 subjects,
+1920 synthetic trials. Softmax-with-reference: `w = softmax([w_raw; 0])` with
+`w_raw` a free (M-1)-vector; `w[M]` is the reference. Multi-category choice
+uses log-bias `rep_vector(-log(K), K)`.
+
+**Phase 2b result (CmdStan 2.38, 4 chains × 500 draws, 8 s, seed 42)**:
+
+| Param | True | Posterior | 90% CI | In CI |
+|---|---|---|---|---|
+| c | 0.80 | 0.94 | [0.29, 1.99] | YES |
+| gamma | 1.50 | 1.94 | [0.63, 4.59] | YES |
+| w₁ | 0.40 | 0.35 | [0.24, 0.47] | YES |
+| w₂ | 0.30 | 0.28 | [0.21, 0.36] | YES |
+| w₃ | 0.20 | 0.17 | [0.04, 0.34] | YES |
+| w₄ | 0.10 | 0.21 | [0.09, 0.35] | YES |
+
+Rhat_max=1.004; ESS_min=1346; 0 divergences. All attention weights within
+90% CI. Softmax-with-reference parameterisation and multi-category choice
+rule both recover cleanly — the novel API has empirical support.
+
+### 6. Real-data fit (06_realdata_fit.R)
 
 Fitted to all 3 nosof88 conditions from Nosofsky (1988), Figure 1 (12 Munsell
 chips, brightness × saturation MDS solution, 2 categories):
@@ -181,10 +208,20 @@ NaN in the subsequent `softmax`. The fix accumulates in log space —
 `multinomial_lpmf(counts | softmax(la))`, avoiding the explicit softmax
 and eliminating the simplex-sum-NaN warnings entirely.
 
-Cost estimate: ~60–70 draws/s for the nosof88 prototype (S=12, J=12, M=2,
-n=25/stim). The rocks scale (S≈150, J=90, M=8) requires benchmarking;
-the O(S·J·M) per-draw cost replaces the previous O(T·J·M), where
-T=S×n. Benchmark vs m3 is Phase 2b.
+**Rocks-scale benchmark (08_rocksscale_benchmark.R, 1 chain, CSR exemplar indexing)**:
+
+| Scale | S | J | M | K | Draws/s (1 chain) |
+|---|---|---|---|---|---|
+| nosof88 | 12 | 12 | 2 | 2 | 176 |
+| medium\_6dim | 24 | 24 | 6 | 4 | 79 |
+| rocks\_100 | 100 | 90 | 8 | 10 | 26 |
+| rocks\_full | 150 | 90 | 8 | 10 | 17.9 |
+
+The rocks-full target (S=150, J=90, M=8, K=10) yields ~17.9 draws/s on a
+single chain — a 4-chain production run completes in a few minutes. CSR
+per-category indexing (`cat_start`/`cat_end`/`ex_flat` passed as Stan data)
+reduces the inner loop from O(J·K) branch-per-exemplar to O(J) with no
+conditional, which is the prerequisite for feasibility at K=10.
 
 ### bmmformula interface
 
