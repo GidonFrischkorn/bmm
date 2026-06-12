@@ -155,6 +155,33 @@ test_that("check_data.dd_choice no G1 warning with wide delays", {
   expect_no_warning(check_data(model, dat, .dd_form))
 })
 
+test_that("check_data.attr_choice passes negative amounts (sign-agnostic base)", {
+  # The base class must not reject signed outcomes — that's dd_choice's job.
+  # Create a minimal attr_choice object (not dd_choice) to test the base directly.
+  base_model <- structure(
+    list(
+      resp_vars  = list(choice_col = "choice"),
+      other_vars = list(
+        options = list(
+          LL = c(amt = "amt_LL", delay = "delay_LL"),
+          SS = c(amt = "amt_SS", delay = "delay_SS")
+        )
+      )
+    ),
+    class = c("bmmodel", "attr_choice")
+  )
+  dat <- .dd_test_data()
+  dat$amt_LL[1] <- -5   # loss trial — valid for CPT, must not error at base
+  expect_no_error(check_data(base_model, dat, .dd_form))
+})
+
+test_that("check_data.dd_choice rejects negative amounts that pass attr_choice", {
+  model <- dd_choice("choice", .dd_opts)
+  dat   <- .dd_test_data()
+  dat$amt_LL[1] <- -5
+  expect_error(check_data(model, dat, .dd_form), "positive")
+})
+
 test_that("check_data.dd_choice qh adds is_delayed indicator columns", {
   model <- dd_choice("choice", .dd_opts, discount_fn = "qh")
   form  <- bmf(logk ~ 1, logit_beta ~ 1, logphi ~ 1)

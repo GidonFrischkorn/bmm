@@ -321,6 +321,15 @@ check_data.dd_choice <- function(model, data, formula) {
   if (is.null(options)) return(NextMethod("check_data"))
   opt_names   <- names(options)
 
+  # ---- amounts must be positive --------------------------------------------
+  for (opt in opt_names) {
+    amt_col <- options[[opt]]["amt"]
+    stopif(
+      any(data[[amt_col]] <= 0, na.rm = TRUE),
+      "Amount column '{amt_col}' must contain only positive values."
+    )
+  }
+
   # ---- delays must be non-negative -----------------------------------------
   for (opt in opt_names) {
     delay_col <- options[[opt]]["delay"]

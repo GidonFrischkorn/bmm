@@ -37,14 +37,5 @@ check_data.attr_choice <- function(model, data, formula) {
     "The following option attribute columns are missing from the data: {collapse_comma(missing_cols)}"
   )
 
-  # ---- amounts must be positive --------------------------------------------
-  for (opt in opt_names) {
-    amt_col <- options[[opt]]["amt"]
-    stopif(
-      any(data[[amt_col]] <= 0, na.rm = TRUE),
-      "Amount column '{amt_col}' must contain only positive values."
-    )
-  }
-
   NextMethod("check_data")
 }
