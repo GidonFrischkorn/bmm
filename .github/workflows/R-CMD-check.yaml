@@ -72,6 +72,8 @@ jobs:
             waldo
             fansi
             yaml
+            BH
+            RcppEigen
 
       - name: Build Cmdstan
         run: |

@@ -46,6 +46,7 @@ jobs:
             tidybayes
             ggplot2
             mixtur
+            MPTinR
             ggthemes
             cowplot
             stringr
