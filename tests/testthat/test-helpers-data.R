@@ -171,7 +171,8 @@ test_that("check_data() returns a data.frame()", {
       nt_distances = "z", resp_cats = c("w", "l"), num_options = c(1, 1),
       mean_rt = "mean_rt", var_rt = "var_rt", n_upper = "n_upper",
       n_trials = "n_trials", rt = "rt", response = "response",
-      stimulus = "stimulus", rank = "rank", m = 2
+      stimulus = "stimulus", rank = "rank", m = 2,
+      trees = mpt_tree("t", list(w = "p", l = "1 - p"))
     )
     # sdt_ranking takes a wide multi-column response, unlike the single
     # `response` column shared by the other count models.

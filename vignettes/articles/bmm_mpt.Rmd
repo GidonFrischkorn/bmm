@@ -1,0 +1,394 @@
+---
+title: "Multinomial Processing Tree (MPT) models"
+output: bookdown::html_document2
+author:
+  - Gidon Frischkorn
+bibliography: REFERENCES.bib
+header-includes:
+  - \usepackage{amsmath}
+vignette: >
+  %\VignetteIndexEntry{Multinomial Processing Tree (MPT) models}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+pkgdown:
+  as_is: true
+---
+
+```{=html}
+<style type="text/css">
+div.main-container {
+max-width: 800px !important;
+}
+
+p {
+margin-top: 1.5em ;
+margin-bottom: 1.5em ;
+}
+.author{
+    display: none;
+}
+</style>
+```
+```{r, include = FALSE}
+options(crayon.enabled = TRUE)
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  dev = "jpeg",
+  dpi = 100,
+  fig.asp = 0.8,
+  fig.width = 5,
+  out.width = "80%",
+  fig.align = "center"
+)
+fansi::set_knit_hooks(knitr::knit_hooks, which = c("output", "message", "error"))
+```
+
+# Introduction to the model
+
+Multinomial Processing Tree (MPT) models are a family of measurement models for tasks with categorical responses [@rieferBatchelder1988; @batchelderRiefer1999; @erdfelderEtAl2009]. They assume that each observed response results from a sequence of discrete latent processing states — for example, detecting an item in memory, and if detection fails, guessing. Each latent process succeeds with some probability, and the branches of the resulting processing tree map every combination of latent outcomes onto one observable response category. The probability of a response category is the sum of the probabilities of all branches that terminate in it, and each branch probability is the product of the process probabilities along its path.
+
+The classic example is the two-high-threshold model (2HTM) of recognition memory. In an old/new recognition test, participants see old items (studied before) and new items (lures) and respond "old" or "new" to each. The 2HTM assumes that an old item is detected as old with probability $D$; if detection fails (probability $1 - D$), the participant guesses "old" with probability $g$. New items are detected as new with probability $D$ (the two detection probabilities can also be separated), and otherwise guessed on. This yields two trees — one per item type — with the response probabilities:
+
+$$
+\begin{aligned}
+P(\text{"old"} \mid \text{old item}) &= D + (1 - D) \cdot g \\
+P(\text{"new"} \mid \text{old item}) &= (1 - D) \cdot (1 - g) \\
+P(\text{"old"} \mid \text{new item}) &= (1 - D) \cdot g \\
+P(\text{"new"} \mid \text{new item}) &= D + (1 - D) \cdot (1 - g)
+\end{aligned}
+$$
+
+In `bmm`, MPT models are fit as hierarchical Bayesian models: all latent probability parameters are estimated on an unconstrained latent scale (logit by default, or probit), where they can be predicted by fixed and random effects using the standard `bmmformula` syntax. With a probit link and correlated random effects across all parameters, this is the latent-trait approach of @klauer2010 as implemented, for example, in TreeBUGS [@heckEtAl2018].
+
+# Specifying an MPT model
+
+An MPT model is specified as a set of trees. Each tree is created with `mpt_tree()`: it has a name (for multi-tree models, the name must match the values of a condition variable in the data), and one branch-probability expression per response category:
+
+```{r}
+library(bmm)
+
+tree_old <- mpt_tree("old", list(
+  old = "D + (1 - D) * g",
+  new = "(1 - D) * (1 - g)"
+))
+tree_new <- mpt_tree("new", list(
+  old = "(1 - D) * g",
+  new = "D + (1 - D) * (1 - g)"
+))
+tree_old
+```
+
+The trees are then combined into a model object with `mpt()`. The `condition` argument names the data column that identifies which tree each observation belongs to:
+
+```{r}
+model_2htm <- mpt(
+  trees = list(tree_old, tree_new),
+  condition = "item_type"
+)
+```
+
+The `plot()` method draws the processing trees implied by the branch expressions — each product in an expression is one root-to-leaf path, and paths sharing a common prefix share the corresponding nodes. This is a quick way to verify that the specified expressions encode the intended tree:
+
+```{r fig-tree-2htm, fig.width = 8, fig.asp = 0.45, out.width = "100%"}
+plot(model_2htm)
+```
+
+The latent parameters are identified automatically from the branch expressions: every symbol that is not a declared covariate (see below) is treated as a parameter. Equality constraints follow directly from the naming — because both trees use the same symbol `D`, detection is equated for old and new items. To estimate separate detection probabilities, you would simply write `Do` and `Dn` instead.
+
+Two things to keep in mind when writing branch expressions:
+
+- Parameter and category names must consist of letters and digits only (no underscores or dots), because they become non-linear parameters in **brms**.
+- Numeric fractions such as `1/4` are automatically converted to decimal literals (`0.25`) — in Stan, a bare integer fraction would be evaluated as integer division.
+
+The default priors are matched to the link function: with the logit link, intercepts get a `logistic(0, 1)` prior — a uniform distribution on the probability scale — and regression effects get a `logistic(0, 0.5)` prior, the same family at half the scale. With `links = "probit"`, the corresponding defaults are `normal(0, 1)` and `normal(0, 0.5)`, matching the priors typically used in latent-trait MPT models.
+
+```{r}
+default_prior(bmf(D ~ 1, g ~ 1), data = data.frame(
+  item_type = c("old", "new"), old = c(10, 3), new = c(5, 12)
+), model = model_2htm)
+```
+
+# Simulating data and fitting the model
+
+The distribution functions `dmpt()` and `rmpt()` provide the multinomial density and random generation for any `mpt()` model. We can use `rmpt()` to simulate a hierarchical data set: 40 participants respond to 100 old and 100 new items, with participant-specific detection and guessing probabilities drawn from a population distribution on the logit scale.
+
+```{r}
+set.seed(124)
+n_subj <- 40
+n_items <- 100
+
+lD_i <- rnorm(n_subj, qlogis(0.7), 0.4)
+lg_i <- rnorm(n_subj, qlogis(0.5), 0.3)
+
+dat <- expand.grid(
+  id = factor(1:n_subj),
+  item_type = c("old", "new"),
+  stringsAsFactors = FALSE
+)
+counts <- t(sapply(seq_len(nrow(dat)), function(i) {
+  subj <- as.integer(dat$id[i])
+  rmpt(
+    n = 1, size = n_items,
+    pars = c(D = plogis(lD_i[subj]), g = plogis(lg_i[subj])),
+    mpt_model = model_2htm, tree = dat$item_type[i], unpack = TRUE
+  )
+}))
+dat <- cbind(dat, counts)
+head(dat)
+```
+
+The data must contain one column of aggregated response counts per response category, named after the branch names of the trees, plus the condition column. Aggregated counts are sufficient whenever parameters and covariates are constant within participant and condition; trial-level data (one row per trial with a 1 in the chosen category's column) also work and are only needed when predictors vary from trial to trial. Model parameters are predicted with the usual `bmmformula` syntax — here, random intercepts for both parameters:
+
+```{r fit-2htm, results = "hide", message = FALSE, warning = FALSE}
+fit_2htm <- bmm(
+  formula = bmf(
+    D ~ 1 + (1 | id),
+    g ~ 1 + (1 | id)
+  ),
+  data = dat,
+  model = model_2htm,
+  backend = "cmdstanr",
+  cores = 4,
+  refresh = 0
+)
+```
+
+```{r}
+summary(fit_2htm)
+```
+
+All estimates are on the logit scale. The population-level detection and guessing probabilities are recovered by applying the inverse link:
+
+```{r}
+plogis(brms::fixef(fit_2htm)[, c("Estimate", "Q2.5", "Q97.5")])
+```
+
+Because the model uses a multinomial family, `pp_check()` produces a response-proportion plot: the observed proportion of each response category against the posterior predictive distribution. Grouping by the condition variable checks the fit within each tree:
+
+```{r fig-ppc-2htm, fig.width = 7, fig.asp = 0.5, out.width = "100%"}
+pp_check(fit_2htm, group = "item_type")
+```
+
+Condition effects are added exactly as in any other `bmm` model. For example, if the design manipulated encoding strength between blocks, `D ~ 0 + strength + (1 | id)` estimates a separate latent-scale detection parameter per strength level, and `brms::hypothesis()` can be used to test differences between them.
+
+# Design-fixed covariates in branch expressions
+
+Some MPT models contain probabilities that are fixed by the experimental design rather than estimated — for example, guessing rates determined by the number of response options. Such quantities can be included in branch expressions as *covariates*: data columns that are declared in the `covariates` argument and passed through to the model unchanged.
+
+The model @oberauerBindings2019 used for n-AFC recognition data illustrates this. The probability of a correct response depends on binding memory (`Pb`) and item memory (`Pi`), while three guessing rates are computed from the size of the response set in each condition:
+
+```{r}
+tree_ss <- mpt_tree("ss", list(
+  correct = "Pb + (1 - Pb) * Pi * GcorrPi + (1 - Pb) * (1 - Pi) * GcorrNoPi",
+  other   = "(1 - Pb) * Pi * (1 - GcorrPi) +
+             (1 - Pb) * (1 - Pi) * (1 - GcorrNoPi) * GotherNoPi",
+  npl     = "(1 - Pb) * (1 - Pi) * (1 - GcorrNoPi) * (1 - GotherNoPi)"
+))
+
+model_ss <- mpt(
+  trees = tree_ss,
+  covariates = c("GcorrPi", "GcorrNoPi", "GotherNoPi")
+)
+model_ss
+```
+
+Only `Pb` and `Pi` are latent parameters; the `Gcorr*` symbols must exist as numeric columns in the data (e.g., `GcorrPi = 1 / rsizeList`). This mechanism goes beyond what classical MPT software supports, because the guessing rates can vary continuously across trials or conditions.
+
+# Fitting real data: an MPT for the m3 example data set
+
+The `oberauer_lewandowsky_2019_e1` data set that the [m3 article](https://venpopov.github.io/bmm/articles/bmm_m3.html) analyzes with activation-based measurement models can equally be described by a processing-tree model, which makes for an instructive real-data example. Participants recalled a list item from a set of candidates in three conditions: in the `new distractors` condition the response set additionally contained five distractors, while in the `old reordered` and `old same` conditions no distractors were present. Each row records how often a participant chose the correct item (`corr`, 1 candidate), another list item (`other`, 4 candidates), a distractor (`dist`, 5 or 0 candidates), or a not-presented lure (`npl`, 5 or 10 candidates):
+
+```{r}
+data_ol <- oberauer_lewandowsky_2019_e1
+data_ol$cond <- factor(
+  data_ol$cond,
+  levels = c("new distractors", "old reordered", "old same"),
+  labels = c("newdist", "oldreord", "oldsame")
+)
+head(data_ol[, 1:6])
+```
+
+We describe the responses by three processes, ordered by how much they constrain the response. First, with probability `Pi`, the list items themselves are remembered. Given item memory, with probability `Pb` the item bound to the probed position is retrieved, yielding a correct response. If the binding is not available, distractor activation may still persist (probability `Pd`) and capture the response — this stage exists only in the distractor condition; otherwise the response is a guess among the five known list candidates. Without item memory, the response is a guess across the full response set of 15 candidates. This yields two tree structures — and illustrates a parameter that exists only in some conditions: `Pd` appears only in the branch expressions of the `newdist` tree, so it is estimated exclusively from that condition, without any indicator-variable bookkeeping.
+
+One response category is impossible in the no-distractor conditions: `dist` responses cannot occur. Because the multinomial likelihood requires strictly positive probabilities, the `dist` category receives a small constant guessing probability there (0.001, compensated in the `npl` branch so the tree still sums to exactly 1); the `m3` implementation uses an equivalent device internally for empty response categories. Written with candidate-count fractions — which `mpt_tree()` folds into exact decimal literals — the trees are:
+
+```{r}
+tree_newdist <- mpt_tree("newdist", list(
+  corr  = "Pi * Pb + Pi * (1 - Pb) * (1 - Pd) * (1/5) + (1 - Pi) * (1/15)",
+  other = "Pi * (1 - Pb) * (1 - Pd) * (4/5) + (1 - Pi) * (4/15)",
+  dist  = "Pi * (1 - Pb) * Pd + (1 - Pi) * (5/15)",
+  npl   = "(1 - Pi) * (5/15)"
+))
+tree_nodist <- list(
+  corr  = "Pi * Pb + Pi * (1 - Pb) * (1/5) + (1 - Pi) * (1/15)",
+  other = "Pi * (1 - Pb) * (4/5) + (1 - Pi) * (4/15)",
+  dist  = "(1 - Pi) * 0.001",
+  npl   = "(1 - Pi) * (10/15 - 0.001)"
+)
+
+model_ol <- mpt(
+  trees = list(
+    tree_newdist,
+    mpt_tree("oldreord", tree_nodist),
+    mpt_tree("oldsame", tree_nodist)
+  ),
+  condition = "cond"
+)
+```
+
+The two distinct tree structures (the `oldreord` tree is identical to the `oldsame` tree):
+
+```{r fig-tree-ol, fig.width = 9, fig.asp = 0.44, out.width = "100%"}
+old_par <- par(mfrow = c(1, 2))
+plot(model_ol$trees$newdist)
+plot(model_ol$trees$oldsame)
+par(old_par)
+```
+
+This MPT is not merely inspired by the [m3 analysis of the same data](https://venpopov.github.io/bmm/articles/bmm_m3.html) — under the `simple` choice rule the two models are *the same likelihood* in different parameterizations. With the m3 activations `corr ~ b + a + c`, `other ~ b + a`, `dist ~ b + d`, `npl ~ b` (candidate counts 1, 4, 5, 5 and $S = 15b + 5a + c + 5d$), the mapping is
+
+$$
+P_i = \frac{5a + c + 5d}{S}, \qquad
+P_b = \frac{c}{5a + c + 5d}, \qquad
+P_d = \frac{d}{a + d},
+$$
+
+and both parameter sets span exactly the same category probabilities (the identity is verified to machine precision in the package's test suite). Item memory corresponds to responding from list-related activation rather than background noise, and binding to the share of context activation within it. Because the m3 analysis lets both `a` and `c` vary by condition, the equivalent MPT lets both `Pi` and `Pb` vary by condition; `d` — and hence `Pd` — only enters the distractor condition. What remains different is where the priors and random effects live: on the log scale of activations in the m3, on the logit scale of the process probabilities here.
+
+```{r fit-ol, results = "hide", message = FALSE, warning = FALSE}
+fit_ol <- bmm(
+  formula = bmf(
+    Pi ~ 0 + cond + (0 + cond || ID),
+    Pb ~ 0 + cond + (0 + cond || ID),
+    Pd ~ 1 + (1 | ID)
+  ),
+  data = data_ol,
+  model = model_ol,
+  backend = "cmdstanr",
+  cores = 4,
+  refresh = 0
+)
+```
+
+```{r}
+plogis(brms::fixef(fit_ol)[, c("Estimate", "Q2.5", "Q97.5")])
+```
+
+Item memory is high in all three conditions — not-presented lures are rarely chosen — while binding memory is clearly higher when the list is re-presented in its original order than in the other two conditions. When item memory succeeds but the binding is unavailable in the distractor condition, distractor activation captures the response about half of the time. The posterior predictive distribution reproduces the response-category proportions within each condition, including the near-zero `dist` proportions where no distractors were shown:
+
+```{r fig-ppc-ol, fig.width = 7, fig.asp = 0.7, out.width = "100%"}
+pp_check(fit_ol, group = "cond")
+```
+
+# Simplex-constrained parameter groups
+
+When several guessing probabilities must sum to 1 — for example, guessing one of three response options — the parameters form a probability simplex. Declaring such groups via the `simplex` argument applies a stick-breaking reparameterization: the last parameter of each group is derived as 1 minus the sum of the others, and each remaining parameter `p` is estimated through an unconstrained component `praw`.
+
+```{r, eval = FALSE}
+model_smm <- mpt(
+  trees = list(tree_sourceA, tree_sourceB, tree_new),
+  condition = "source",
+  simplex = c("gA", "gB", "gNew")
+)
+
+# predictor formulas are specified for the simplex parameters themselves;
+# they are applied to the corresponding stick-breaking components
+fit_smm <- bmm(
+  bmf(dA ~ 1 + (1 | id), dB ~ 1 + (1 | id), gA ~ 1, gB ~ 1),
+  data, model_smm
+)
+```
+
+The derived parameter (here `gNew`) cannot receive its own predictors. Several independent simplex groups can be declared by passing a list of character vectors.
+
+# Time-varying and other non-linear parameters
+
+Because MPT parameters are ordinary `bmm` parameters, they can be given non-linear predictor formulas — for example, a detection probability that grows exponentially with presentation time:
+
+```{r, eval = FALSE}
+fit_tv <- bmm(
+  bmf(
+    D ~ inv_logit(Dmax) * (1 - exp(-exp(rate) * ptime)),
+    Dmax ~ 1 + (1 | id),
+    rate ~ 1 + (1 | id)
+  ),
+  data, model_2htm
+)
+```
+
+When a parameter receives a non-linear formula, the automatic link transformation is switched off for it: the user-supplied expression is responsible for keeping the parameter within (0, 1). The sub-parameters of the expression (`Dmax` and `rate` above) are estimated on the identity scale with `normal(0, 1)` default priors. When the random-effect standard deviations of such sub-parameters are close to zero, the posterior can develop a funnel geometry — increasing `adapt_delta` (e.g., to 0.95) is then advisable.
+
+# Ordered parameter constraints
+
+The same mechanism expresses order constraints between parameters — for example, requiring detection of old items to exceed detection of new items ($D_o > D_n$) in a 2HTM with separate detection parameters. No dedicated constraint syntax is needed: derive the larger parameter from the smaller one such that the constraint holds by construction.
+
+The recommended formulation interpolates on the probability scale:
+
+```{r, eval = FALSE}
+fit_ordered <- bmm(
+  bmf(
+    Do ~ Dn + (1 - Dn) * inv_logit(phi),
+    Dn ~ 1 + (1 | id),
+    g ~ 1 + (1 | id),
+    phi ~ 1 + (1 | id)
+  ),
+  data, model_2htm_separate
+)
+```
+
+Here `Dn` remains an ordinary logit-scale parameter with its usual priors, and `phi` is the (logit of the) proportion of the remaining probability space above $D_n$ that $D_o$ covers: $D_o = D_n + (1 - D_n) \cdot \text{logit}^{-1}(\phi)$, which lies in $(D_n, 1)$ for every posterior draw. Because `Dn` appears in a non-linear formula, its link transformation is applied automatically — you write plain `Dn` and get $\text{logit}^{-1}(D_n)$ in the model. For a uniform prior on the covered proportion, set `prior("logistic(0, 1)", class = "b", nlpar = "phi")`.
+
+An equivalent alternative shifts on the latent scale, as latent-trait MPT implementations usually do: `Dn ~ inv_logit(lDn)` and `Do ~ inv_logit(lDn + exp(delta))`, with `lDn` and `delta` receiving the predictor formulas. Both formulations enforce the order in every posterior draw and recover the generating parameters. In a validation on simulated 2HTM data, however, the interpolation sampled cleanly with default settings, while the latent-offset version developed a funnel (the log-gap parameter `delta` degenerates when the gap closes) that required `adapt_delta = 0.99` — another reason to prefer the interpolation.
+
+One pitfall to avoid: do **not** write the latent offset against the parameter name directly, as in `Do ~ inv_logit(Dn + exp(delta))`. The automatic link substitution turns the inner `Dn` into $\text{logit}^{-1}(D_n)$ — a probability — so the expression adds a probability and a latent-scale offset, and the resulting $D_o$ is *not* guaranteed to exceed $D_n$ (e.g., $D_n = 0.9$ with a small offset yields $D_o \approx 0.71$). Constraint expressions must keep all terms on one scale: either work with probabilities (the interpolation above) or introduce explicit latent-scale sub-parameters like `lDn`.
+
+# Importing existing model definitions
+
+Models written for other MPT software can be imported directly. `mpt_from_string()` reads MPTinR-style model definitions [@singmannKellen2013], where each line is a branch expression, blank lines separate trees, and inline comments name the response categories:
+
+```{r}
+model_string <- "
+D + (1 - D) * g        # old
+(1 - D) * (1 - g)      # new
+
+(1 - D) * g            # old
+D + (1 - D) * (1 - g)  # new
+"
+mpt_from_string(
+  model_string,
+  tree_names = c("old", "new"),
+  condition = "item_type"
+)
+```
+
+`mpt_from_eqn()` reads EQN files (used by multiTree, MPTinR, and TreeBUGS). Constants are substituted via the `restrictions` argument, and parameter names containing underscores — which are common in published EQN files but not allowed in **brms** — are sanitized automatically, with the complete renaming map reported and stored in the `mpt_renaming` attribute:
+
+```{r}
+eqn_file <- tempfile(fileext = ".eqn")
+writeLines(c(
+  "6",
+  "old  old_hit   D_o",
+  "old  old_hit   (1-D_o)*g",
+  "old  old_miss  (1-D_o)*(1-g)",
+  "new  new_fa    (1-D_n)*g",
+  "new  new_cr    D_n",
+  "new  new_cr    (1-D_n)*(1-g)"
+), eqn_file)
+
+model_eqn <- mpt_from_eqn(
+  eqn_file,
+  categories = c(old_hit = "old", new_fa = "old",
+                 old_miss = "new", new_cr = "new"),
+  condition = "item_type"
+)
+model_eqn
+```
+
+Note the `categories` argument: classical EQN files often label response categories per tree (`hit`/`miss` for old items, `fa`/`cr` for new items), while in `bmm` every tree shares the same response categories — the actual response options. The mapping states which tree-specific labels refer to the same response.
+
+Two conventions of the classical formats are handled automatically: branch lines that terminate in the same response category are summed, and lines whose category carries a `<tree>_` prefix have the prefix removed.
+
+As a real-world example, the 12- and 18-parameter hierarchical binding models of @alhadhramiEtAl2025 (3 trees, 10 response categories, TreeBUGS latent-trait structure) can be imported from their published EQN files and fitted with `links = "probit"` and correlated random effects across all parameters — reproducing all 18 published group-level estimates within the paper's credible intervals.
+
+# References
