@@ -3396,6 +3396,8 @@ rsdt_ranking <- function(n, n_trials, m, dprime,
 #'   model of choice response time: Linear ballistic accumulation. *Cognitive
 #'   Psychology*, 57(3), 153-178.
 #'
+#' @keywords distribution
+#'
 #' @examples
 #' dat <- rlba(n = 1000, drift = c(3, 1.5), gap = 0.5, sp = 0.3, ndt = 0.3)
 #' head(dat)
