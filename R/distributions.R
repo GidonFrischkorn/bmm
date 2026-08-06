@@ -1231,6 +1231,56 @@ log_diff_exp <- function(a, b) {
   a + log1m_exp(b - a)
 }
 
+.logsumexp2 <- function(a, b) {
+  m <- pmax(a, b)
+  m + log(exp(a - m) + exp(b - m))
+}
+
+.logdiffexp <- function(a, b) {
+  out <- rep(-Inf, length(a))
+  ok <- is.finite(a) & (a > b)
+  out[ok] <- a[ok] + log1p(-exp(b[ok] - a[ok]))
+  out
+}
+
+.log_normal_cdf_diff <- function(lower, upper) {
+  out <- rep(-Inf, length(lower))
+  valid <- upper > lower
+  if (!any(valid)) {
+    return(out)
+  }
+
+  lower_v <- lower[valid]
+  upper_v <- upper[valid]
+  lower_pos <- lower_v >= 0
+  upper_neg <- upper_v <= 0
+  mixed <- !(lower_pos | upper_neg)
+  valid_idx <- which(valid)
+
+  if (any(lower_pos)) {
+    idx <- valid_idx[lower_pos]
+    out[idx] <- .logdiffexp(
+      stats::pnorm(lower_v[lower_pos], lower.tail = FALSE, log.p = TRUE),
+      stats::pnorm(upper_v[lower_pos], lower.tail = FALSE, log.p = TRUE)
+    )
+  }
+  if (any(upper_neg)) {
+    idx <- valid_idx[upper_neg]
+    out[idx] <- .logdiffexp(
+      stats::pnorm(upper_v[upper_neg], log.p = TRUE),
+      stats::pnorm(lower_v[upper_neg], log.p = TRUE)
+    )
+  }
+  if (any(mixed)) {
+    idx <- valid_idx[mixed]
+    out[idx] <- log(
+      stats::pnorm(upper_v[mixed]) - stats::pnorm(lower_v[mixed])
+    )
+  }
+
+  out
+}
+
 .pwald <- function(rt, drift, bound, s, lower.tail = TRUE, log.p = TRUE) {
   z1 <- (drift * rt - bound) / (s * sqrt(rt))
   z2 <- -(drift * rt + bound) / (s * sqrt(rt))
@@ -3377,6 +3427,168 @@ plba <- function(q, drift, gap, sp, ndt, s = 1,
                  lower.tail = TRUE, log.p = FALSE) {
   distribution <- match.arg(distribution)
   validate_lba_parameters(drift, gap, sp, ndt, s, distribution)
+# RACING DIFFUSION MODEL (RDM) DISTRIBUTION FUNCTIONS                   ####
+############################################################################# !
+
+#' @title Distribution functions for the Racing Diffusion Model (RDM)
+#'
+#' @description Density, random generation, CDF, and quantile functions for the
+#'   Racing Diffusion Model (Tillman, Van Zandt, & Logan, 2020). The RDM is a
+#'   multi-accumulator race model where each accumulator follows a Wald (inverse
+#'   Gaussian) distribution. The first accumulator to finish determines the
+#'   response and the RT.
+#'
+#' @name rdm_dist
+#'
+#' @param rt Numeric vector of response times (in seconds).
+#' @param q Numeric vector of quantiles (response times in seconds).
+#' @param p Numeric vector of probabilities.
+#' @param n Number of observations to generate.
+#' @param response Integer vector indicating which accumulator won (1-indexed).
+#' @param drift Numeric vector of drift rates for each accumulator (all > 0).
+#' @param gap Threshold gap (> 0). The distance between the maximum starting
+#'   point and the decision threshold. The total threshold is computed as
+#'   `b = gap + sp`, ensuring `b > sp` structurally.
+#' @param ndt Non-decision time in seconds (>= 0).
+#' @param s Diffusion constant (> 0), default = 1.
+#' @param sp Maximum starting point (>= 0). Starting evidence is uniformly
+#'   distributed on `[0, sp]`. Default = 0 (no starting point variability).
+#' @param log Logical; if `TRUE`, values are returned on the log scale.
+#' @param lower.tail Logical; if `TRUE` (default), probabilities are P(X <= x).
+#' @param log.p Logical; if `TRUE`, probabilities are given as log(p).
+#'
+#' @return
+#'   - `drdm()` returns a numeric vector of (log-)densities.
+#'   - `rrdm()` returns a data.frame with columns `rt` and `response`.
+#'   - `prdm()` returns a numeric vector of (log-)probabilities.
+#'   - `qrdm()` returns a numeric vector of quantiles (response times).
+#'
+#' @references
+#' Tillman, G., Van Zandt, T., & Logan, G. D. (2020). Sequential sampling
+#'   models without random between-trial variability: the racing diffusion
+#'   model of speeded decision making. Psychonomic Bulletin & Review, 27,
+#'   911-936.
+#'
+#' @keywords distribution
+#'
+#' @examples
+#' dat <- rrdm(n = 1000, drift = c(3, 1.5), gap = 1, sp = 0, ndt = 0.2)
+#' head(dat)
+#' hist(dat$rt)
+#'
+#' # with starting point variability
+#' dat2 <- rrdm(n = 1000, drift = c(3, 1.5), gap = 0.7, sp = 0.3, ndt = 0.2)
+#' @export
+drdm <- function(rt, response, drift, gap, ndt, s = 1, sp = 0,
+                 log = FALSE) {
+  validate_rdm_parameters(drift, gap, ndt, s, sp)
+
+  n <- max(length(rt), length(response), length(gap), length(ndt), length(s), length(sp))
+  rt <- rep_len(rt, n)
+  response <- rep_len(response, n)
+  gap <- rep_len(gap, n)
+  ndt <- rep_len(ndt, n)
+  s <- rep_len(s, n)
+  sp <- rep_len(sp, n)
+
+  b <- gap + sp
+  A <- sp
+  invalid <- rt - ndt <= 0
+
+  if (!any(invalid)) {
+    return(.drdm(rt, response, drift, b, A, ndt, s, log))
+  }
+
+  out <- rep(if (log) -Inf else 0, n)
+  valid <- !invalid
+  if (any(valid)) {
+    out[valid] <- .drdm(rt[valid], response[valid], drift, b[valid], A[valid],
+                        ndt[valid], s[valid], log)
+  }
+  out
+}
+
+.drdm <- function(rt, response, drift, b, A, ndt, s, log) {
+  K <- length(drift)
+  t <- rt - ndt
+
+  if (all(A == 0)) {
+    log_lik <- .dwald(t, drift = drift[response], bound = b, s = s, log = TRUE)
+    for (j in seq_len(K)) {
+      is_loser <- (j != response)
+      if (!any(is_loser)) next
+      log_lik[is_loser] <- log_lik[is_loser] +
+        .pwald(t[is_loser], drift = drift[j], bound = b[is_loser],
+               s = s[is_loser],
+               lower.tail = FALSE, log.p = TRUE)
+    }
+  } else if (all(A > 0)) {
+    log_lik <- .dwald_full(t, drift = drift[response], bound = b, A = A,
+                           s = s, log = TRUE)
+    for (j in seq_len(K)) {
+      is_loser <- (j != response)
+      if (!any(is_loser)) next
+      log_lik[is_loser] <- log_lik[is_loser] +
+        .pwald_full(t[is_loser], drift = drift[j], bound = b[is_loser],
+                    A = A[is_loser], s = s[is_loser], lower.tail = FALSE,
+                    log.p = TRUE)
+    }
+  } else {
+    zero_idx <- A == 0
+    log_lik <- numeric(length(t))
+
+    if (any(zero_idx)) {
+      log_lik[zero_idx] <- .drdm(
+        rt[zero_idx], response[zero_idx], drift,
+        b[zero_idx], A = 0, ndt[zero_idx], s[zero_idx], log = TRUE
+      )
+    }
+    if (any(!zero_idx)) {
+      log_lik[!zero_idx] <- .drdm(
+        rt[!zero_idx], response[!zero_idx], drift,
+        b[!zero_idx], A[!zero_idx], ndt[!zero_idx], s[!zero_idx], log = TRUE
+      )
+    }
+  }
+
+  if (log) log_lik else exp(log_lik)
+}
+
+#' @rdname rdm_dist
+#' @export
+rrdm <- function(n, drift, gap, ndt, s = 1, sp = 0) {
+  validate_rdm_parameters(drift, gap, ndt, s, sp)
+  b <- gap + sp
+  A <- sp
+  .rrdm(n, drift, b, A, ndt, s)
+}
+
+.rrdm <- function(n, drift, b, A, ndt, s) {
+  K <- length(drift)
+
+  if (A == 0) {
+    ft <- matrix(
+      .rwald_ig(n * K, drift = rep(drift, each = n),
+                bound = b, s = s),
+      nrow = n, ncol = K
+    )
+  } else {
+    start <- matrix(stats::runif(n * K, min = 0, max = A), nrow = n, ncol = K)
+    ft <- matrix(NA_real_, nrow = n, ncol = K)
+    for (j in seq_len(K)) {
+      ft[, j] <- .rwald_ig(n, drift = drift[j], bound = b - start[, j], s = s)
+    }
+  }
+
+  winner <- apply(ft, 1, which.min)
+  data.frame(rt = apply(ft, 1, min) + ndt, response = winner)
+}
+
+#' @rdname rdm_dist
+#' @export
+prdm <- function(q, drift, gap, ndt, s = 1, sp = 0,
+                 lower.tail = TRUE, log.p = FALSE) {
+  validate_rdm_parameters(drift, gap, ndt, s, sp)
   K <- length(drift)
   t <- q - ndt
   b <- gap + sp
@@ -3678,4 +3890,207 @@ validate_lba_parameters <- function(drift, gap, sp, ndt, s, distribution) {
     stopif(any(drift <= 0),
            "drift must be positive for distribution '{distribution}'.")
   }
+  log_surv <- numeric(length(t))
+  if (A == 0) {
+    for (j in seq_len(K)) {
+      log_surv <- log_surv +
+        .pwald(t, drift = drift[j], bound = b, s = s,
+               lower.tail = FALSE, log.p = TRUE)
+    }
+  } else {
+    for (j in seq_len(K)) {
+      log_surv <- log_surv +
+        .pwald_full(t, drift = drift[j], bound = b, A = A, s = s,
+                    lower.tail = FALSE, log.p = TRUE)
+    }
+  }
+  log_p <- log(1 - exp(log_surv))
+
+  if (!lower.tail) log_p <- log(1 - exp(log_p))
+  if (log.p) log_p else exp(log_p)
+}
+
+#' @rdname rdm_dist
+#' @export
+qrdm <- function(p, drift, gap, ndt, s = 1, sp = 0,
+                 lower.tail = TRUE, log.p = FALSE) {
+  validate_rdm_parameters(drift, gap, ndt, s, sp)
+  if (log.p) p <- exp(p)
+  if (!lower.tail) p <- 1 - p
+
+  b <- gap + sp
+  A <- sp
+  vapply(p, function(pi) {
+    if (pi <= 0) return(ndt)
+    if (pi >= 1) return(Inf)
+    cdf_fn <- function(q) {
+      prdm(q, drift = drift, gap = gap, ndt = ndt, s = s, sp = sp) - pi
+    }
+    upper <- ndt + max(b / drift) * 5
+    stats::uniroot(cdf_fn, interval = c(ndt + 1e-10, upper),
+                   tol = 1e-8)$root
+  }, numeric(1))
+}
+
+validate_rdm_parameters <- function(drift, gap, ndt, s, sp) {
+  stopif(any(drift <= 0), "drift rates must be positive.")
+  stopif(any(gap <= 0), "gap (threshold gap) must be positive.")
+  stopif(any(ndt < 0), "ndt (non-decision time) must be non-negative.")
+  stopif(any(s <= 0), "s (diffusion constant) must be positive.")
+  stopif(any(sp < 0), "sp (maximum starting point) must be non-negative.")
+}
+
+
+# Michael-Schucany-Haas algorithm for inverse Gaussian
+.rwald_ig <- function(n, drift, bound, s) {
+  mu_ig <- bound / drift
+  lambda_ig <- (bound / s)^2
+  y <- stats::rchisq(n, df = 1)
+  x <- mu_ig + (mu_ig^2 * y -
+    mu_ig * sqrt(4 * mu_ig * lambda_ig * y + mu_ig^2 * y^2)) /
+    (2 * lambda_ig)
+  u <- stats::runif(n)
+  ifelse(u <= mu_ig / (mu_ig + x), x, mu_ig^2 / x)
+}
+
+
+.rdm_full_pdf_raw <- function(t, drift, bound, A, s) {
+  s_sqrt_t <- s * sqrt(t)
+  alpha <- (bound - A - t * drift) / s_sqrt_t
+  beta <- (bound - t * drift) / s_sqrt_t
+
+  (1 / A) * (
+    -drift * stats::pnorm(alpha) +
+      (s / sqrt(t)) * stats::dnorm(alpha) +
+      drift * stats::pnorm(beta) -
+      (s / sqrt(t)) * stats::dnorm(beta)
+  )
+}
+
+.rdm_full_cdf_raw <- function(t, drift, bound, A, s) {
+  s2 <- s^2
+  sqrt_t <- sqrt(t)
+  bA <- bound - A
+  alpha1 <- (drift * t - bound) / (s * sqrt_t)
+  alpha2 <- (drift * t - bA) / (s * sqrt_t)
+  beta1 <- -(drift * t + bound) / (s * sqrt_t)
+  beta2 <- -(drift * t + bA) / (s * sqrt_t)
+
+  use_limit <- abs(drift) < 1e-10
+  cdf_val <- numeric(length(t))
+
+  if (any(!use_limit)) {
+    idx <- !use_limit
+    cdf_val[idx] <-
+      (1 / (2 * drift * A)) *
+        (stats::pnorm(alpha2[idx]) - stats::pnorm(alpha1[idx])) +
+      (s * sqrt_t[idx] / A) *
+        (alpha2[idx] * stats::pnorm(alpha2[idx]) -
+           alpha1[idx] * stats::pnorm(alpha1[idx])) -
+      (1 / (2 * drift * A)) *
+        (exp(2 * drift * bA / s2) * stats::pnorm(beta2[idx]) -
+           exp(2 * drift * bound / s2) * stats::pnorm(beta1[idx])) +
+      (s * sqrt_t[idx] / A) *
+        (stats::dnorm(alpha2[idx]) - stats::dnorm(alpha1[idx]))
+  }
+
+  if (any(use_limit)) {
+    idx <- use_limit
+    a1_0 <- -bound / (s * sqrt_t[idx])
+    a2_0 <- -bA / (s * sqrt_t[idx])
+    cdf_val[idx] <-
+      (s * sqrt_t[idx] / A) *
+        (a2_0 * stats::pnorm(a2_0) - a1_0 * stats::pnorm(a1_0) +
+           stats::dnorm(a2_0) - stats::dnorm(a1_0))
+  }
+
+  cdf_val
+}
+
+.rdm_full_surv_antiderivative <- function(u, t, drift, s) {
+  q <- s^2 / (2 * drift)
+  s_sqrt_t <- s * sqrt(t)
+  drift_t <- drift * t
+  y <- (u - drift_t) / s_sqrt_t
+  z <- -(drift_t + u) / s_sqrt_t
+
+  (u - drift_t - q) * stats::pnorm(y) +
+    s_sqrt_t * stats::dnorm(y) -
+    q * exp(2 * drift * u / (s^2)) * stats::pnorm(z)
+}
+
+.rdm_full_surv_raw <- function(t, drift, bound, A, s) {
+  (
+    .rdm_full_surv_antiderivative(bound, t, drift, s) -
+      .rdm_full_surv_antiderivative(bound - A, t, drift, s)
+  ) / A
+}
+
+# Tillman et al. (2020), Eq. 5
+.dwald_full <- function(t, drift, bound, A, s, log = TRUE) {
+  s_sqrt_t <- s * sqrt(t)
+  alpha <- (bound - A - t * drift) / s_sqrt_t
+  beta <- (bound - t * drift) / s_sqrt_t
+
+  use_tail <- alpha > 0
+  log_pdf <- rep(NA_real_, length(t))
+
+  if (any(use_tail)) {
+    idx <- use_tail
+    log_term1 <- log(drift) + .log_normal_cdf_diff(alpha[idx], beta[idx])
+    log_term2 <- log(s / sqrt(t[idx])) + .logdiffexp(
+      stats::dnorm(alpha[idx], log = TRUE),
+      stats::dnorm(beta[idx], log = TRUE)
+    )
+    log_pdf[idx] <- .logsumexp2(log_term1, log_term2) - log(A)
+  }
+
+  if (any(!use_tail)) {
+    idx <- !use_tail
+    pdf_val <- .rdm_full_pdf_raw(t[idx], drift, bound, A, s)
+    log_pdf[idx] <- log(pdf_val)
+  }
+
+  if (log) log_pdf else exp(log_pdf)
+}
+
+
+# Tillman et al. (2020), Appendix A
+.pwald_full <- function(t, drift, bound, A, s, lower.tail = TRUE,
+                        log.p = TRUE) {
+  cdf_val <- .rdm_full_cdf_raw(t, drift, bound, A, s)
+
+  if (lower.tail) {
+    log_p <- rep(-Inf, length(t))
+    use_cdf <- cdf_val > 0 & cdf_val < 1 & cdf_val >= 0.5
+    log_p[use_cdf] <- log(cdf_val[use_cdf])
+
+    need_surv <- !use_cdf
+    if (any(need_surv)) {
+      idx <- which(need_surv)
+      surv_val <- .rdm_full_surv_raw(t[idx], drift, bound, A, s)
+      use_surv <- surv_val >= 0 & surv_val < 1
+      log_p[idx[use_surv]] <- log1p(-surv_val[use_surv])
+      use_fallback <- !use_surv & cdf_val[idx] > 0 & cdf_val[idx] < 1
+      log_p[idx[use_fallback]] <- log(cdf_val[idx[use_fallback]])
+      log_p[idx[!use_surv & cdf_val[idx] >= 1]] <- 0
+    }
+  } else {
+    log_p <- rep(0, length(t))
+    use_cdf <- cdf_val > 0 & cdf_val < 0.5
+    log_p[use_cdf] <- log1p(-cdf_val[use_cdf])
+
+    need_surv <- !use_cdf & cdf_val > 0
+    if (any(need_surv)) {
+      idx <- which(need_surv)
+      surv_val <- .rdm_full_surv_raw(t[idx], drift, bound, A, s)
+      use_surv <- surv_val > 0 & surv_val < 1
+      log_p[idx[use_surv]] <- log(surv_val[use_surv])
+      use_fallback <- !use_surv & cdf_val[idx] >= 0 & cdf_val[idx] < 1
+      log_p[idx[use_fallback]] <- log1p(-cdf_val[idx[use_fallback]])
+      log_p[idx[!use_surv & cdf_val[idx] >= 1]] <- -Inf
+    }
+  }
+
+  if (log.p) log_p else exp(log_p)
 }

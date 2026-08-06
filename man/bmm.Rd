@@ -112,6 +112,7 @@ The following models are supported:
 \item mixture2p(resp_error)
 \item mixture3p(resp_error, nt_features, set_size, regex)
 \item mpt(trees, condition, covariates, simplex, links)
+\item rdm(rt, response, n_choices, version, accumulators, links)
 \item sdm(resp_error, version)
 \item sdt_binary(response, stimulus, n_trials, dist, links)
 \item sdt_mafc(response, n_trials, m, dist, links)
