@@ -3345,6 +3345,10 @@ rsdt_ranking <- function(n, n_trials, m, dprime,
     }
   }
   counts
+}
+
+
+############################################################################# !
 # LBA Distribution Functions                                             ####
 ############################################################################# !
 
@@ -3427,168 +3431,6 @@ plba <- function(q, drift, gap, sp, ndt, s = 1,
                  lower.tail = TRUE, log.p = FALSE) {
   distribution <- match.arg(distribution)
   validate_lba_parameters(drift, gap, sp, ndt, s, distribution)
-# RACING DIFFUSION MODEL (RDM) DISTRIBUTION FUNCTIONS                   ####
-############################################################################# !
-
-#' @title Distribution functions for the Racing Diffusion Model (RDM)
-#'
-#' @description Density, random generation, CDF, and quantile functions for the
-#'   Racing Diffusion Model (Tillman, Van Zandt, & Logan, 2020). The RDM is a
-#'   multi-accumulator race model where each accumulator follows a Wald (inverse
-#'   Gaussian) distribution. The first accumulator to finish determines the
-#'   response and the RT.
-#'
-#' @name rdm_dist
-#'
-#' @param rt Numeric vector of response times (in seconds).
-#' @param q Numeric vector of quantiles (response times in seconds).
-#' @param p Numeric vector of probabilities.
-#' @param n Number of observations to generate.
-#' @param response Integer vector indicating which accumulator won (1-indexed).
-#' @param drift Numeric vector of drift rates for each accumulator (all > 0).
-#' @param gap Threshold gap (> 0). The distance between the maximum starting
-#'   point and the decision threshold. The total threshold is computed as
-#'   `b = gap + sp`, ensuring `b > sp` structurally.
-#' @param ndt Non-decision time in seconds (>= 0).
-#' @param s Diffusion constant (> 0), default = 1.
-#' @param sp Maximum starting point (>= 0). Starting evidence is uniformly
-#'   distributed on `[0, sp]`. Default = 0 (no starting point variability).
-#' @param log Logical; if `TRUE`, values are returned on the log scale.
-#' @param lower.tail Logical; if `TRUE` (default), probabilities are P(X <= x).
-#' @param log.p Logical; if `TRUE`, probabilities are given as log(p).
-#'
-#' @return
-#'   - `drdm()` returns a numeric vector of (log-)densities.
-#'   - `rrdm()` returns a data.frame with columns `rt` and `response`.
-#'   - `prdm()` returns a numeric vector of (log-)probabilities.
-#'   - `qrdm()` returns a numeric vector of quantiles (response times).
-#'
-#' @references
-#' Tillman, G., Van Zandt, T., & Logan, G. D. (2020). Sequential sampling
-#'   models without random between-trial variability: the racing diffusion
-#'   model of speeded decision making. Psychonomic Bulletin & Review, 27,
-#'   911-936.
-#'
-#' @keywords distribution
-#'
-#' @examples
-#' dat <- rrdm(n = 1000, drift = c(3, 1.5), gap = 1, sp = 0, ndt = 0.2)
-#' head(dat)
-#' hist(dat$rt)
-#'
-#' # with starting point variability
-#' dat2 <- rrdm(n = 1000, drift = c(3, 1.5), gap = 0.7, sp = 0.3, ndt = 0.2)
-#' @export
-drdm <- function(rt, response, drift, gap, ndt, s = 1, sp = 0,
-                 log = FALSE) {
-  validate_rdm_parameters(drift, gap, ndt, s, sp)
-
-  n <- max(length(rt), length(response), length(gap), length(ndt), length(s), length(sp))
-  rt <- rep_len(rt, n)
-  response <- rep_len(response, n)
-  gap <- rep_len(gap, n)
-  ndt <- rep_len(ndt, n)
-  s <- rep_len(s, n)
-  sp <- rep_len(sp, n)
-
-  b <- gap + sp
-  A <- sp
-  invalid <- rt - ndt <= 0
-
-  if (!any(invalid)) {
-    return(.drdm(rt, response, drift, b, A, ndt, s, log))
-  }
-
-  out <- rep(if (log) -Inf else 0, n)
-  valid <- !invalid
-  if (any(valid)) {
-    out[valid] <- .drdm(rt[valid], response[valid], drift, b[valid], A[valid],
-                        ndt[valid], s[valid], log)
-  }
-  out
-}
-
-.drdm <- function(rt, response, drift, b, A, ndt, s, log) {
-  K <- length(drift)
-  t <- rt - ndt
-
-  if (all(A == 0)) {
-    log_lik <- .dwald(t, drift = drift[response], bound = b, s = s, log = TRUE)
-    for (j in seq_len(K)) {
-      is_loser <- (j != response)
-      if (!any(is_loser)) next
-      log_lik[is_loser] <- log_lik[is_loser] +
-        .pwald(t[is_loser], drift = drift[j], bound = b[is_loser],
-               s = s[is_loser],
-               lower.tail = FALSE, log.p = TRUE)
-    }
-  } else if (all(A > 0)) {
-    log_lik <- .dwald_full(t, drift = drift[response], bound = b, A = A,
-                           s = s, log = TRUE)
-    for (j in seq_len(K)) {
-      is_loser <- (j != response)
-      if (!any(is_loser)) next
-      log_lik[is_loser] <- log_lik[is_loser] +
-        .pwald_full(t[is_loser], drift = drift[j], bound = b[is_loser],
-                    A = A[is_loser], s = s[is_loser], lower.tail = FALSE,
-                    log.p = TRUE)
-    }
-  } else {
-    zero_idx <- A == 0
-    log_lik <- numeric(length(t))
-
-    if (any(zero_idx)) {
-      log_lik[zero_idx] <- .drdm(
-        rt[zero_idx], response[zero_idx], drift,
-        b[zero_idx], A = 0, ndt[zero_idx], s[zero_idx], log = TRUE
-      )
-    }
-    if (any(!zero_idx)) {
-      log_lik[!zero_idx] <- .drdm(
-        rt[!zero_idx], response[!zero_idx], drift,
-        b[!zero_idx], A[!zero_idx], ndt[!zero_idx], s[!zero_idx], log = TRUE
-      )
-    }
-  }
-
-  if (log) log_lik else exp(log_lik)
-}
-
-#' @rdname rdm_dist
-#' @export
-rrdm <- function(n, drift, gap, ndt, s = 1, sp = 0) {
-  validate_rdm_parameters(drift, gap, ndt, s, sp)
-  b <- gap + sp
-  A <- sp
-  .rrdm(n, drift, b, A, ndt, s)
-}
-
-.rrdm <- function(n, drift, b, A, ndt, s) {
-  K <- length(drift)
-
-  if (A == 0) {
-    ft <- matrix(
-      .rwald_ig(n * K, drift = rep(drift, each = n),
-                bound = b, s = s),
-      nrow = n, ncol = K
-    )
-  } else {
-    start <- matrix(stats::runif(n * K, min = 0, max = A), nrow = n, ncol = K)
-    ft <- matrix(NA_real_, nrow = n, ncol = K)
-    for (j in seq_len(K)) {
-      ft[, j] <- .rwald_ig(n, drift = drift[j], bound = b - start[, j], s = s)
-    }
-  }
-
-  winner <- apply(ft, 1, which.min)
-  data.frame(rt = apply(ft, 1, min) + ndt, response = winner)
-}
-
-#' @rdname rdm_dist
-#' @export
-prdm <- function(q, drift, gap, ndt, s = 1, sp = 0,
-                 lower.tail = TRUE, log.p = FALSE) {
-  validate_rdm_parameters(drift, gap, ndt, s, sp)
   K <- length(drift)
   t <- q - ndt
   b <- gap + sp
@@ -3890,6 +3732,177 @@ validate_lba_parameters <- function(drift, gap, sp, ndt, s, distribution) {
     stopif(any(drift <= 0),
            "drift must be positive for distribution '{distribution}'.")
   }
+}
+
+
+############################################################################# !
+# RACING DIFFUSION MODEL (RDM) DISTRIBUTION FUNCTIONS                   ####
+############################################################################# !
+
+#' @title Distribution functions for the Racing Diffusion Model (RDM)
+#'
+#' @description Density, random generation, CDF, and quantile functions for the
+#'   Racing Diffusion Model (Tillman, Van Zandt, & Logan, 2020). The RDM is a
+#'   multi-accumulator race model where each accumulator follows a Wald (inverse
+#'   Gaussian) distribution. The first accumulator to finish determines the
+#'   response and the RT.
+#'
+#' @name rdm_dist
+#'
+#' @param rt Numeric vector of response times (in seconds).
+#' @param q Numeric vector of quantiles (response times in seconds).
+#' @param p Numeric vector of probabilities.
+#' @param n Number of observations to generate.
+#' @param response Integer vector indicating which accumulator won (1-indexed).
+#' @param drift Numeric vector of drift rates for each accumulator (all > 0).
+#' @param gap Threshold gap (> 0). The distance between the maximum starting
+#'   point and the decision threshold. The total threshold is computed as
+#'   `b = gap + sp`, ensuring `b > sp` structurally.
+#' @param ndt Non-decision time in seconds (>= 0).
+#' @param s Diffusion constant (> 0), default = 1.
+#' @param sp Maximum starting point (>= 0). Starting evidence is uniformly
+#'   distributed on `[0, sp]`. Default = 0 (no starting point variability).
+#' @param log Logical; if `TRUE`, values are returned on the log scale.
+#' @param lower.tail Logical; if `TRUE` (default), probabilities are P(X <= x).
+#' @param log.p Logical; if `TRUE`, probabilities are given as log(p).
+#'
+#' @return
+#'   - `drdm()` returns a numeric vector of (log-)densities.
+#'   - `rrdm()` returns a data.frame with columns `rt` and `response`.
+#'   - `prdm()` returns a numeric vector of (log-)probabilities.
+#'   - `qrdm()` returns a numeric vector of quantiles (response times).
+#'
+#' @references
+#' Tillman, G., Van Zandt, T., & Logan, G. D. (2020). Sequential sampling
+#'   models without random between-trial variability: the racing diffusion
+#'   model of speeded decision making. Psychonomic Bulletin & Review, 27,
+#'   911-936.
+#'
+#' @keywords distribution
+#'
+#' @examples
+#' dat <- rrdm(n = 1000, drift = c(3, 1.5), gap = 1, sp = 0, ndt = 0.2)
+#' head(dat)
+#' hist(dat$rt)
+#'
+#' # with starting point variability
+#' dat2 <- rrdm(n = 1000, drift = c(3, 1.5), gap = 0.7, sp = 0.3, ndt = 0.2)
+#' @export
+drdm <- function(rt, response, drift, gap, ndt, s = 1, sp = 0,
+                 log = FALSE) {
+  validate_rdm_parameters(drift, gap, ndt, s, sp)
+
+  n <- max(length(rt), length(response), length(gap), length(ndt), length(s), length(sp))
+  rt <- rep_len(rt, n)
+  response <- rep_len(response, n)
+  gap <- rep_len(gap, n)
+  ndt <- rep_len(ndt, n)
+  s <- rep_len(s, n)
+  sp <- rep_len(sp, n)
+
+  b <- gap + sp
+  A <- sp
+  invalid <- rt - ndt <= 0
+
+  if (!any(invalid)) {
+    return(.drdm(rt, response, drift, b, A, ndt, s, log))
+  }
+
+  out <- rep(if (log) -Inf else 0, n)
+  valid <- !invalid
+  if (any(valid)) {
+    out[valid] <- .drdm(rt[valid], response[valid], drift, b[valid], A[valid],
+                        ndt[valid], s[valid], log)
+  }
+  out
+}
+
+.drdm <- function(rt, response, drift, b, A, ndt, s, log) {
+  K <- length(drift)
+  t <- rt - ndt
+
+  if (all(A == 0)) {
+    log_lik <- .dwald(t, drift = drift[response], bound = b, s = s, log = TRUE)
+    for (j in seq_len(K)) {
+      is_loser <- (j != response)
+      if (!any(is_loser)) next
+      log_lik[is_loser] <- log_lik[is_loser] +
+        .pwald(t[is_loser], drift = drift[j], bound = b[is_loser],
+               s = s[is_loser],
+               lower.tail = FALSE, log.p = TRUE)
+    }
+  } else if (all(A > 0)) {
+    log_lik <- .dwald_full(t, drift = drift[response], bound = b, A = A,
+                           s = s, log = TRUE)
+    for (j in seq_len(K)) {
+      is_loser <- (j != response)
+      if (!any(is_loser)) next
+      log_lik[is_loser] <- log_lik[is_loser] +
+        .pwald_full(t[is_loser], drift = drift[j], bound = b[is_loser],
+                    A = A[is_loser], s = s[is_loser], lower.tail = FALSE,
+                    log.p = TRUE)
+    }
+  } else {
+    zero_idx <- A == 0
+    log_lik <- numeric(length(t))
+
+    if (any(zero_idx)) {
+      log_lik[zero_idx] <- .drdm(
+        rt[zero_idx], response[zero_idx], drift,
+        b[zero_idx], A = 0, ndt[zero_idx], s[zero_idx], log = TRUE
+      )
+    }
+    if (any(!zero_idx)) {
+      log_lik[!zero_idx] <- .drdm(
+        rt[!zero_idx], response[!zero_idx], drift,
+        b[!zero_idx], A[!zero_idx], ndt[!zero_idx], s[!zero_idx], log = TRUE
+      )
+    }
+  }
+
+  if (log) log_lik else exp(log_lik)
+}
+
+#' @rdname rdm_dist
+#' @export
+rrdm <- function(n, drift, gap, ndt, s = 1, sp = 0) {
+  validate_rdm_parameters(drift, gap, ndt, s, sp)
+  b <- gap + sp
+  A <- sp
+  .rrdm(n, drift, b, A, ndt, s)
+}
+
+.rrdm <- function(n, drift, b, A, ndt, s) {
+  K <- length(drift)
+
+  if (A == 0) {
+    ft <- matrix(
+      .rwald_ig(n * K, drift = rep(drift, each = n),
+                bound = b, s = s),
+      nrow = n, ncol = K
+    )
+  } else {
+    start <- matrix(stats::runif(n * K, min = 0, max = A), nrow = n, ncol = K)
+    ft <- matrix(NA_real_, nrow = n, ncol = K)
+    for (j in seq_len(K)) {
+      ft[, j] <- .rwald_ig(n, drift = drift[j], bound = b - start[, j], s = s)
+    }
+  }
+
+  winner <- apply(ft, 1, which.min)
+  data.frame(rt = apply(ft, 1, min) + ndt, response = winner)
+}
+
+#' @rdname rdm_dist
+#' @export
+prdm <- function(q, drift, gap, ndt, s = 1, sp = 0,
+                 lower.tail = TRUE, log.p = FALSE) {
+  validate_rdm_parameters(drift, gap, ndt, s, sp)
+  K <- length(drift)
+  t <- q - ndt
+  b <- gap + sp
+  A <- sp
+
   log_surv <- numeric(length(t))
   if (A == 0) {
     for (j in seq_len(K)) {
