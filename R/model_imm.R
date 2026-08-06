@@ -3,8 +3,8 @@
 ############################################################################# !
 
 .model_imm <- function(resp_error = NULL, nt_features = NULL, nt_distances = NULL,
-                       set_size = NULL, regex = FALSE, version = "full", links = NULL,
-                       call = NULL, ...) {
+                       set_size = NULL, regex = FALSE, version = "full",
+                       links = NULL, call = NULL, ...) {
   out <- structure(
     list(
       resp_vars = nlist(resp_error),
@@ -73,6 +73,78 @@
   out
 }
 
+.model_imm_cd <- function(response = NULL, probe = NULL, target = NULL,
+                          nt_features = NULL, nt_distances = NULL,
+                          set_size = NULL, regex = FALSE, version = "full",
+                          links = NULL, call = NULL, ...) {
+  out <- structure(
+    list(
+      resp_vars = nlist(response, probe, target),
+      other_vars = nlist(nt_features, nt_distances, set_size),
+      domain = "Visual working memory",
+      task = "Change detection",
+      name = "Interference measurement model for single-probe change detection.",
+      version = version,
+      citation = glue(
+        "Oberauer, K., & Lin, H.Y. (2017). An interference model of visual \\
+        working memory. Psychological Review, 124(1), 21-59; \\
+        Lin, H.Y., & Oberauer, K. (2022). An interference model for visual \\
+        working memory: Applications to the change detection task. \\
+        Cognitive Psychology, 133, 101463."
+      ),
+      requirements = glue(
+        "- response: binary, coded 0 = 'same' and 1 = 'change'
+        - probe: the probed feature in radians
+        - target: the feature shown at the probed location in radians
+        - The non-target features should be in radians and be centered \\
+        relative to the target
+        - The non-target distances should be positive"
+      ),
+      parameters = list(
+        mu = glue(
+          "Location of the target component of the retrieval distribution \\
+          (in radians). Fixed internally to 0 by default."
+        ),
+        kappa = "Concentration parameter of the von Mises distribution",
+        a = "General activation of memory items",
+        c = "Context activation",
+        s = "Spatial similarity gradient",
+        criterion = glue(
+          "Decision criterion. A 'change' response is given when the \\
+          log-likelihood ratio exceeds the criterion, so larger values make \\
+          'change' responses less likely. Fixed to 0 (unbiased) by default; \\
+          supply a formula for criterion to estimate it."
+        )
+      ),
+      links = list(
+        mu = "tan_half",
+        kappa = "log",
+        a = "log",
+        c = "log",
+        s = "log",
+        criterion = "identity"
+      ),
+      fixed_parameters = list(mu = 0, criterion = 0),
+      default_priors = list(
+        mu = list(main = "student_t(1, 0, 1)"),
+        kappa = list(main = "normal(2, 1)", effects = "normal(0, 1)"),
+        a = list(main = "normal(0, 1)", effects = "normal(0, 1)"),
+        c = list(main = "normal(0, 1)", effects = "normal(0, 1)"),
+        s = list(main = "normal(0, 1)", effects = "normal(0, 1)"),
+        criterion = list(main = "normal(0, 0.5)", effects = "normal(0, 0.5)")
+      ),
+      void_mu = FALSE
+    ),
+    regex = regex,
+    regex_vars = c("nt_features", "nt_distances"),
+    class = c("bmmodel", "change_detection", "non_targets", "imm_cd",
+              paste0("imm_cd_", version)),
+    call = call
+  )
+  out$links[names(links)] <- links
+  out
+}
+
 # user facing alias
 
 #' @title `r .model_imm()$name`
@@ -116,6 +188,12 @@
 #'   columns in the dataset.
 #' @param version Character. The version of the IMM model to use. Can be one of
 #'  `full`, `bsc`, or `abc`. The default is `full`.
+#' @param response The name of the variable in the dataset containing the binary
+#'   response (0 = "same", 1 = "change"). Required when `task = "cd"`.
+#' @param probe The name of the variable containing the probe color in radians.
+#'   Required when `task = "cd"`.
+#' @param target The name of the variable containing the target color in
+#'   radians. Required when `task = "cd"`.
 #' @param ... used internally for testing, ignore it
 #' @return An object of class `bmmodel`
 #' @keywords bmmodel
@@ -184,20 +262,95 @@
 #'   backend = "cmdstanr"
 #' )
 #' @export
-imm <- function(resp_error, nt_features, nt_distances, set_size, regex = FALSE, version = "full", ...) {
+imm <- function(resp_error = NULL, nt_features = NULL, nt_distances = NULL,
+                set_size = NULL, response = NULL, probe = NULL, target = NULL,
+                regex = FALSE, version = "full", links = NULL, ...) {
   call <- match.call()
+  version <- match.arg(version, c("full", "bsc", "abc"))
   dots <- list(...)
   if ("setsize" %in% names(dots)) {
     set_size <- dots$setsize
     warning2("The argument 'setsize' is deprecated. Please use 'set_size' instead.")
   }
-  if (version == "abc") nt_distances <- NULL
-  stop_missing_args()
+  cd_args <- c(response, probe, target)
+  stopif(
+    is.null(resp_error) && length(cd_args) == 0,
+    "Provide either 'resp_error' for continuous reproduction, or 'response',
+    'probe' and 'target' for change detection."
+  )
+  stopif(
+    !is.null(resp_error) && length(cd_args) > 0,
+    "Provide either 'resp_error' or the change detection arguments 'response',
+    'probe' and 'target', not both."
+  )
+  stopif(is.null(nt_features), "Argument 'nt_features' is required.")
+  stopif(is.null(set_size), "Argument 'set_size' is required.")
+  if (version == "abc") {
+    nt_distances <- NULL
+  } else {
+    stopif(
+      is.null(nt_distances),
+      "Argument 'nt_distances' is required for version = '{version}'."
+    )
+  }
 
+  out <- if (is.null(resp_error)) {
+    stopif(
+      length(cd_args) < 3,
+      "Change detection requires all of 'response', 'probe' and 'target'."
+    )
+    .model_imm_cd(
+      response = response, probe = probe, target = target,
+      nt_features = nt_features, nt_distances = nt_distances,
+      set_size = set_size, regex = regex, version = version, links = links, ...
+    )
+  } else {
+    .model_imm(
+      resp_error = resp_error, nt_features = nt_features,
+      nt_distances = nt_distances, set_size = set_size, regex = regex,
+      version = version, links = links, ...
+    )
+  }
+  attr(out, "call") <- call
+  out
+}
+
+#' @rdname imm
+#' @export
+imm_de <- function(resp_error, nt_features, nt_distances = NULL, set_size,
+                   regex = FALSE, version = "full", links = NULL, ...) {
+  call <- match.call()
+  version <- match.arg(version, c("full", "bsc", "abc"))
+  if (version == "abc") {
+    nt_distances <- NULL
+  } else {
+    stopif(
+      is.null(nt_distances),
+      "Argument 'nt_distances' is required for version = '{version}'."
+    )
+  }
   .model_imm(
     resp_error = resp_error, nt_features = nt_features,
     nt_distances = nt_distances, set_size = set_size, regex = regex,
-    version = version, call = call, ...
+    version = version, links = links, call = call, ...
+  )
+}
+
+#' @rdname imm
+#' @export
+imm_cd <- function(response, probe, target, nt_features, nt_distances, set_size,
+                   regex = FALSE, version = "full", links = NULL, ...) {
+  call <- match.call()
+  stop_missing_args()
+  stopif(
+    version != "full",
+    "Only version = 'full' is currently supported by `imm_cd()`."
+  )
+  .model_imm_cd(
+    response = response, probe = probe, target = target,
+    nt_features = nt_features, nt_distances = nt_distances,
+    set_size = set_size, regex = regex, version = version, links = links,
+    call = call, ...
   )
 }
 
@@ -221,6 +374,15 @@ check_data.imm_full <- function(model, data, formula) {
   NextMethod("check_data")
 }
 
+#' @export
+check_data.imm_cd <- function(model, data, formula) {
+  data <- .check_data_imm_dist(model, data, formula)
+  attr(data, "cd_nt_distances_matrix") <- data.matrix(
+    data[, model$other_vars$nt_distances, drop = FALSE]
+  )
+  NextMethod("check_data")
+}
+
 .check_data_imm_dist <- function(model, data, formula) {
   nt_distances <- model$other_vars$nt_distances
   max_set_size <- attr(data, "max_set_size")
@@ -238,6 +400,8 @@ check_data.imm_full <- function(model, data, formula) {
     any(data[, nt_distances] < 0),
     "All non-target distances to the target need to be postive."
   )
+
+  attr(data, "cd_nt_distances_matrix") <- data.matrix(data[, nt_distances, drop = FALSE])
 
   data
 }
@@ -331,6 +495,81 @@ configure_model.imm_full <- function(model, data, formula) {
   formula$family <- .imm_mixture_family(max_set_size)
 
   nlist(formula, data)
+}
+
+#' @export
+configure_model.imm_cd_full <- function(model, data, formula) {
+  family <- brms::custom_family(
+    name = "imm_cd_full",
+    dpars = c("mu", "kappa", "c", "a", "s", "criterion"),
+    links = c("tan_half", "log", "log", "log", "log", "identity"),
+    lb = c(NA, 0, NA, NA, NA, NA),
+    ub = rep(NA, 6),
+    type = "int",
+    vars = c("vreal1", "cd_nt_features", "cd_nt_distances", "cd_lure_idx",
+             "cd_gl_x", "cd_gl_w", "cd_free_criterion"),
+    loop = FALSE,
+    log_lik = log_lik_imm_cd_full,
+    posterior_predict = posterior_predict_imm_cd_full
+  )
+
+  stanvars <- .cd_stanvars(model, "imm_cd_full_funs.stan") +
+    brms::stanvar(x = attr(data, "cd_nt_features_matrix"), name = "cd_nt_features") +
+    brms::stanvar(x = attr(data, "cd_nt_distances_matrix"), name = "cd_nt_distances") +
+    brms::stanvar(x = attr(data, "cd_lure_idx_matrix"), name = "cd_lure_idx")
+
+  formula <- bmf2bf(model, formula)
+  formula$family <- family
+
+  nlist(formula, data, stanvars)
+}
+
+#' @export
+bmf2bf.imm_cd_full <- function(model, formula = bmmformula()) {
+  brms::bf(glue(
+    "{model$resp_vars$response} | vreal(probe_centered) ~ {.extract_mu_rhs(formula)}"
+  ))
+}
+
+log_lik_imm_cd_full <- function(i, prep) {
+  nt <- .extract_cd_nt_data(i, prep, has_distances = TRUE)
+  dimm_cd(
+    prep$data$Y[i],
+    prep$data$vreal1[i],
+    nt_features = nt$nt_features,
+    nt_distances = nt$nt_distances,
+    lure_idx = nt$lure_idx,
+    kappa = brms::get_dpar(prep, "kappa", i = i),
+    c = brms::get_dpar(prep, "c", i = i),
+    a = brms::get_dpar(prep, "a", i = i),
+    s = brms::get_dpar(prep, "s", i = i),
+    criterion = brms::get_dpar(prep, "criterion", i = i),
+    mu = brms::get_dpar(prep, "mu", i = i),
+    log = TRUE
+  )
+}
+
+posterior_predict_imm_cd_full <- function(i, prep, ...) {
+  nt <- .extract_cd_nt_data(i, prep, has_distances = TRUE)
+  kappa <- brms::get_dpar(prep, "kappa", i = i)
+  rimm_cd(
+    length(kappa),
+    prep$data$vreal1[i],
+    nt_features = nt$nt_features,
+    nt_distances = nt$nt_distances,
+    lure_idx = nt$lure_idx,
+    kappa = kappa,
+    c = brms::get_dpar(prep, "c", i = i),
+    a = brms::get_dpar(prep, "a", i = i),
+    s = brms::get_dpar(prep, "s", i = i),
+    criterion = brms::get_dpar(prep, "criterion", i = i),
+    mu = brms::get_dpar(prep, "mu", i = i)
+  )
+}
+
+#' @export
+configure_prior.imm_cd_full <- function(model, data, formula, user_prior, ...) {
+  .configure_prior_imm(model, data, formula, nlpars = c("a", "s"))
 }
 
 ############################################################################# !

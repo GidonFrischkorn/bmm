@@ -154,10 +154,12 @@ test_that("check_data() returns a data.frame()", {
   # - mean_rt_upper/lower, var_rt_upper/lower for ezdm 4par
   # - stimulus (0/1) for sdt_binary (response counts come from `response`)
   # - rank1, rank2 for sdt_ranking (wide rank-frequency count columns)
+  # - probe, target, response for the change detection models
   # Use 50 rows to avoid small sample size warnings from cswald
   test_data <- data.frame(
     y = rep(1, 50), x = rep(1, 50), z = rep(2, 50), w = rep(1, 50),
     s = rep(2, 50), l = rep(1, 50),
+    probe = rep(0.5, 50), target = rep(0.5, 50),
     mean_rt = rep(0.5, 50), var_rt = rep(0.02, 50),
     n_upper = rep(80, 50), n_trials = rep(100, 50),
     mean_rt_upper = rep(0.45, 50), mean_rt_lower = rep(0.55, 50),
@@ -173,7 +175,7 @@ test_that("check_data() returns a data.frame()", {
       n_trials = "n_trials", rt = "rt", response = "response",
       stimulus = "stimulus", rank = "rank", m = 2,
       trees = mpt_tree("t", list(w = "p", l = "1 - p")),
-      n_choices = 2
+      n_choices = 2, probe = "probe", target = "target"
     )
     # sdt_ranking takes a wide multi-column response, unlike the single
     # `response` column shared by the other count models.

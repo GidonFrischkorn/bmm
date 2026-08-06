@@ -218,6 +218,88 @@ rsdm <- function(n, mu = 0, c = 3, kappa = 3.5, parametrization = "sqrtexp") {
   )
 }
 
+#' @title Distribution functions for the SDM change detection model
+#'
+#' @description Density and random generation for the signal discrimination
+#'   model applied to the single-probe change detection task. The decision rule
+#'   is the one of Lin & Oberauer (2022), extended to the sdm: the observer
+#'   responds "change" when the memory density at the probe falls below the
+#'   uniform, scaled by the criterion. The sdm is not one of the models they
+#'   compare, so this is an extension of their framework rather than a model
+#'   they fit.
+#'
+#' @name sdm_cd_dist
+#'
+#' @param response Binary vector (0 = "same", 1 = "change")
+#' @param n Number of observations to generate
+#' @param probe Probe value in radians, relative to the target
+#' @param c Memory strength
+#' @param kappa Precision of the memory distribution
+#' @param criterion Decision criterion, called beta in Lin & Oberauer (2022).
+#'   The response is "change" when the log-likelihood ratio exceeds
+#'   `criterion`, so `criterion = 0` (the default) is the unbiased observer.
+#' @param mu Location of the memory distribution in radians
+#' @param log Logical; if `TRUE`, return log probability.
+#'
+#' @details Because the sdm density is far more peaked than a von Mises, the
+#'   integral over the decision arc is taken with an adaptive rule: the arc is
+#'   split at every periodic image of the density's peak and at multiples of
+#'   the spike width, and Gauss-Legendre is applied to each piece. A fixed rule
+#'   over the whole arc is not usable here.
+#'
+#' @keywords distribution
+#'
+#' @references Lin, H.Y., & Oberauer, K. (2022). An interference model for
+#'   visual working memory: Applications to the change detection task.
+#'   Cognitive Psychology, 133, 101463.
+#'
+#' @return `dsdm_cd` gives the likelihood of the binary response, `rsdm_cd`
+#'   gives random binary responses.
+#'
+#' @export
+dsdm_cd <- function(response, probe, c = 5, kappa = 4, criterion = 0, mu = 0,
+                    log = FALSE) {
+  stopif(isTRUE(any(kappa < 0)), "kappa must be non-negative")
+  stopif(isTRUE(any(c < 0)), "c must be non-negative")
+
+  obs <- .recycle_cd_args(
+    response = response, probe = probe, c = c, kappa = kappa,
+    criterion = criterion, mu = mu
+  )
+  stopif(
+    !all(obs$response %in% c(0, 1)),
+    "response must be binary (0 or 1)."
+  )
+
+  p_same <- .sdm_cd_psame(obs)
+  loglik <- ifelse(obs$response == 1, log1p(-p_same), log(p_same))
+
+  if (log) loglik else exp(loglik)
+}
+
+#' @rdname sdm_cd_dist
+#' @export
+rsdm_cd <- function(n, probe, c = 5, kappa = 4, criterion = 0, mu = 0) {
+  obs <- .recycle_cd_args(probe = probe, c = c, kappa = kappa,
+                          criterion = criterion, mu = mu)
+  stats::rbinom(n, size = 1, prob = 1 - .sdm_cd_psame(obs))
+}
+
+.sdm_cd_psame <- function(obs) {
+  gl <- .cd_gauss_legendre()
+  vapply(seq_len(obs$n), function(i) {
+    log_z <- .sdm_log_int(-pi, pi, 0, obs$c[i], obs$kappa[i], gl)
+    hw <- .sdm_crit_angle(obs$c[i], obs$kappa[i], obs$criterion[i], log_z)
+    if (hw <= 0) return(.Machine$double.eps)
+    if (hw >= pi) return(1 - .Machine$double.eps)
+    p <- exp(
+      .sdm_log_int(obs$probe[i] - hw, obs$probe[i] + hw, obs$mu[i],
+                   obs$c[i], obs$kappa[i], gl) - log_z
+    )
+    min(max(p, .Machine$double.eps), 1 - .Machine$double.eps)
+  }, numeric(1))
+}
+
 # helper functions for calculating the density of the SDM distribution
 .dsdm_numer_bessel <- function(x, mu, c, kappa, log = FALSE) {
   be <- besselI(kappa, nu = 0, expon.scaled = TRUE)
@@ -330,6 +412,94 @@ rmixture2p <- function(n, mu = 0, kappa = 5, p_mem = 0.6) {
   )
 }
 
+#' @title Distribution functions for the mixture2p change detection model
+#'
+#' @name mixture2p_cd_dist
+#'
+#' @description Density and random generation for the two-parameter mixture
+#'   model applied to the change detection task, based on Lin & Oberauer (2022).
+#'
+#' @param response Binary vector (0 = "same", 1 = "change")
+#' @param n Number of observations to generate
+#' @param probe Probe value in radians, relative to the target
+#' @param kappa Concentration parameter of the von Mises distribution
+#' @param p_mem Probability of retrieving the target from memory
+#' @param criterion Decision criterion, called beta in Lin & Oberauer (2022).
+#'   The response is "change" when the log-likelihood ratio exceeds `criterion`,
+#'   so `criterion = 0` (the default) is the unbiased observer and larger values
+#'   make "change" responses less likely.
+#' @param mu Bias of the retrieval distribution in radians
+#' @param log Logical; if `TRUE`, values are returned on the log scale.
+#'
+#' @details The observer retrieves a feature `x` from memory and responds
+#'   "change" when the log-likelihood ratio of Equation 8 in Lin & Oberauer
+#'   (2022) exceeds `criterion`. Since the ratio increases monotonically in the
+#'   distance between `x` and the probe, that decision region is an arc, and
+#'   the probability of a "change" response is the retrieval mass outside it.
+#'   When `criterion = 0` the boundary depends on `kappa` alone (their
+#'   Appendix B).
+#'
+#' @keywords distribution
+#'
+#' @references Lin, H.Y., & Oberauer, K. (2022). An interference model for
+#'   visual working memory: Applications to the change detection task.
+#'   Cognitive Psychology, 133, 101463.
+#'
+#' @return `dmixture2p_cd` gives the likelihood of the binary response,
+#'   `rmixture2p_cd` gives random binary responses.
+#'
+#' @export
+dmixture2p_cd <- function(response, probe, kappa = 5, p_mem = 0.6,
+                          criterion = 0, mu = 0, log = FALSE) {
+  stopif(isTRUE(any(kappa < 0)), "kappa must be non-negative")
+  stopif(isTRUE(any(p_mem < 0 | p_mem > 1)), "p_mem must be between zero and one.")
+
+  obs <- .recycle_cd_args(
+    response = response, probe = probe, kappa = kappa,
+    p_mem = p_mem, criterion = criterion, mu = mu
+  )
+  stopif(
+    !all(obs$response %in% c(0, 1)),
+    "response must be binary (0 or 1)."
+  )
+
+  p_same <- .mixture2p_cd_psame(
+    obs$probe, obs$kappa, obs$p_mem, obs$criterion, obs$mu
+  )
+  loglik <- ifelse(obs$response == 1, log1p(-p_same), log(p_same))
+
+  if (log) loglik else exp(loglik)
+}
+
+#' @rdname mixture2p_cd_dist
+#' @export
+rmixture2p_cd <- function(n, probe, kappa = 5, p_mem = 0.6, criterion = 0,
+                          mu = 0) {
+  obs <- .recycle_cd_args(probe = probe, kappa = kappa, p_mem = p_mem,
+                          criterion = criterion, mu = mu)
+  p_same <- .mixture2p_cd_psame(obs$probe, obs$kappa, obs$p_mem, obs$criterion,
+                                obs$mu)
+  stats::rbinom(n, size = 1, prob = 1 - p_same)
+}
+
+# Probability of a "same" response: the retrieval mass inside the decision arc.
+# Kept on the "same" scale rather than the complement so that the log-likelihood
+# of rare "same" responses does not lose precision to cancellation.
+.mixture2p_cd_psame <- function(probe, kappa, p_mem, criterion, mu) {
+  half_width <- .cd_crit_angle(kappa, criterion, p_mem)
+
+  p_same <- p_mem * .cd_vm_arc_mass(wrap(probe), half_width, kappa, mu) +
+    (1 - p_mem) * half_width / pi
+  p_same[half_width <= 0] <- 0
+  p_same[half_width >= pi] <- 1
+
+  pmin(pmax(p_same, .Machine$double.eps), 1 - .Machine$double.eps)
+}
+
+.log_mix <- function(weight, log_p1, log_p2) {
+  matrixStats::logSumExp(c(log(weight) + log_p1, log(1 - weight) + log_p2))
+}
+
 #' @title Distribution functions for the three-parameter mixture model (mixture3p)
 #'
 #' @description Density, distribution, and random generation functions for the
@@ -432,6 +602,103 @@ rmixture3p <- function(n, mu = c(0, 2, -1.5), kappa = 5, p_mem = 0.6, p_nt = 0.2
     max_f = max_y,
     proposal_fun = function(n) stats::runif(n, -pi, pi)
   )
+}
+
+#' @title Distribution functions for the mixture3p change detection model
+#'
+#' @name mixture3p_cd_dist
+#'
+#' @description Density and random generation for the three-parameter mixture
+#'   model applied to the single-probe change detection task, based on
+#'   Lin & Oberauer (2022).
+#'
+#' @param response Binary vector (0 = "same", 1 = "change")
+#' @param n Number of observations to generate
+#' @param probe Probe value in radians, relative to the target
+#' @param nt_features Numeric vector or matrix of non-target feature values in
+#'   radians, relative to the target
+#' @param lure_idx Numeric vector or matrix flagging active non-targets (1) and
+#'   inactive ones (0). Defaults to all active.
+#' @param kappa Concentration parameter of the von Mises distribution
+#' @param thetat Mixture weight for retrieving the target
+#' @param thetant Mixture weight for retrieving a non-target
+#' @param criterion Decision criterion, called beta in Lin & Oberauer (2022).
+#'   The response is "change" when the log-likelihood ratio exceeds
+#'   `criterion`, so `criterion = 0` (the default) is the unbiased observer.
+#' @param mu Location of the target component in radians
+#' @param log Logical; if `TRUE`, return log probability.
+#'
+#' @details The mixture weights are on the log scale and normalised by softmax
+#'   together with a fixed guessing weight of 0, matching the continuous
+#'   reproduction model. Only the target component counts towards the decision
+#'   process, which treats non-target retrievals and guesses alike as uniform
+#'   (Lin & Oberauer, 2022, Eq. 5).
+#'
+#' @references Lin, H.Y., & Oberauer, K. (2022). An interference model for
+#'   visual working memory: Applications to the change detection task.
+#'   Cognitive Psychology, 133, 101463.
+#'
+#' @return `dmixture3p_cd` gives the likelihood of the binary response,
+#'   `rmixture3p_cd` gives random binary responses.
+#'
+#' @keywords distribution
+#' @export
+dmixture3p_cd <- function(response, probe, nt_features, lure_idx = NULL,
+                          kappa = 5, thetat = 1, thetant = 0, criterion = 0,
+                          mu = 0, log = FALSE) {
+  stopif(isTRUE(any(kappa < 0)), "kappa must be non-negative")
+
+  obs <- .recycle_cd_args(
+    response = response, probe = probe, kappa = kappa, thetat = thetat,
+    thetant = thetant, criterion = criterion, mu = mu
+  )
+  stopif(
+    !all(obs$response %in% c(0, 1)),
+    "response must be binary (0 or 1)."
+  )
+  nt <- .prepare_cd_nt_inputs(nt_features, lure_idx, n = obs$n)
+
+  p_same <- .mixture3p_cd_psame(obs, nt)
+  loglik <- ifelse(obs$response == 1, log1p(-p_same), log(p_same))
+
+  if (log) loglik else exp(loglik)
+}
+
+#' @rdname mixture3p_cd_dist
+#' @export
+rmixture3p_cd <- function(n, probe, nt_features, lure_idx = NULL, kappa = 5,
+                          thetat = 1, thetant = 0, criterion = 0, mu = 0) {
+  obs <- .recycle_cd_args(
+    probe = probe, kappa = kappa, thetat = thetat, thetant = thetant,
+    criterion = criterion, mu = mu
+  )
+  nt <- .prepare_cd_nt_inputs(nt_features, lure_idx, n = obs$n)
+  stats::rbinom(n, size = 1, prob = 1 - .mixture3p_cd_psame(obs, nt))
+}
+
+.mixture3p_cd_psame <- function(obs, nt) {
+  n_active <- rowSums(nt$lure_idx)
+  w_target <- exp(obs$thetat)
+  w_nt <- ifelse(n_active > 0, exp(obs$thetant), 0)
+  z <- w_target + w_nt + 1
+
+  half_width <- .cd_crit_angle(obs$kappa, obs$criterion, w_target / z)
+  centre <- wrap(obs$probe)
+
+  inside <- w_target * .cd_vm_arc_mass(centre, half_width, obs$kappa, obs$mu) +
+    half_width / pi
+  for (k in seq_len(ncol(nt$nt_features))) {
+    active <- nt$lure_idx[, k] > 0.5
+    if (!any(active)) next
+    contrib <- (w_nt / pmax(n_active, 1)) *
+      .cd_vm_arc_mass(centre, half_width, obs$kappa, nt$nt_features[, k])
+    inside <- inside + ifelse(active, contrib, 0)
+  }
+
+  p_same <- inside / z
+  p_same[half_width <= 0] <- 0
+  p_same[half_width >= pi] <- 1
+  pmin(pmax(p_same, .Machine$double.eps), 1 - .Machine$double.eps)
 }
 
 #' @title Distribution functions for the Interference Measurement Model (IMM)
@@ -558,6 +825,107 @@ rimm <- function(n, mu = c(0, 2, -1.5), dist = c(0, 0.5, 2),
     max_f = max_y,
     proposal_fun = function(n) stats::runif(n, -pi, pi)
   )
+}
+
+#' @title Distribution functions for the IMM change detection model
+#'
+#' @name imm_cd_dist
+#'
+#' @description Density and random generation for the interference measurement
+#'   model applied to the single-probe change detection task, based on
+#'   Lin & Oberauer (2022).
+#'
+#' @param response Binary vector (0 = "same", 1 = "change")
+#' @param n Number of observations to generate
+#' @param probe Probe value in radians, relative to the target
+#' @param nt_features Numeric vector or matrix of non-target feature values in
+#'   radians, relative to the target
+#' @param nt_distances Numeric vector or matrix of non-negative distances
+#'   between each non-target location and the probed location
+#' @param lure_idx Numeric vector or matrix flagging active non-targets (1) and
+#'   inactive ones (0). Defaults to all active.
+#' @param kappa Concentration parameter of the von Mises distribution
+#' @param c Context activation, on the natural scale
+#' @param a General activation of memory items, on the natural scale
+#' @param s Spatial similarity gradient, on the natural scale
+#' @param criterion Decision criterion, called beta in Lin & Oberauer (2022).
+#'   The response is "change" when the log-likelihood ratio exceeds
+#'   `criterion`, so `criterion = 0` (the default) is the unbiased observer.
+#' @param mu Location of the target component in radians
+#' @param log Logical; if `TRUE`, return log probability.
+#'
+#' @details The retrieval distribution is the activation-weighted mixture of the
+#'   continuous reproduction model: the target draws activation from both the
+#'   context cue and the context-independent source, each non-target draws
+#'   context activation attenuated over its distance from the probed location,
+#'   and the background contributes a constant. The decision process treats
+#'   everything but the target as uniform, and the target's mixture weight plays
+#'   the role of P_s in Equation B.21 of Lin & Oberauer (2022).
+#'
+#' @references Lin, H.Y., & Oberauer, K. (2022). An interference model for
+#'   visual working memory: Applications to the change detection task.
+#'   Cognitive Psychology, 133, 101463.
+#'
+#' @return `dimm_cd` gives the likelihood of the binary response, `rimm_cd`
+#'   gives random binary responses.
+#'
+#' @keywords distribution
+#' @export
+dimm_cd <- function(response, probe, nt_features, nt_distances,
+                    lure_idx = NULL, kappa = 5, c = 5, a = 2, s = 2,
+                    criterion = 0, mu = 0, log = FALSE) {
+  stopif(isTRUE(any(kappa < 0)), "kappa must be non-negative")
+  stopif(isTRUE(any(c < 0)), "c must be non-negative")
+  stopif(isTRUE(any(a < 0)), "a must be non-negative")
+  stopif(isTRUE(any(s < 0)), "s must be non-negative")
+
+  obs <- .recycle_cd_args(
+    response = response, probe = probe, kappa = kappa, c = c, a = a, s = s,
+    criterion = criterion, mu = mu
+  )
+  stopif(
+    !all(obs$response %in% c(0, 1)),
+    "response must be binary (0 or 1)."
+  )
+  nt <- .prepare_cd_nt_inputs(nt_features, lure_idx, nt_distances, n = obs$n)
+
+  p_same <- .imm_cd_psame(obs, nt)
+  loglik <- ifelse(obs$response == 1, log1p(-p_same), log(p_same))
+
+  if (log) loglik else exp(loglik)
+}
+
+#' @rdname imm_cd_dist
+#' @export
+rimm_cd <- function(n, probe, nt_features, nt_distances, lure_idx = NULL,
+                    kappa = 5, c = 5, a = 2, s = 2, criterion = 0, mu = 0) {
+  obs <- .recycle_cd_args(
+    probe = probe, kappa = kappa, c = c, a = a, s = s, criterion = criterion,
+    mu = mu
+  )
+  nt <- .prepare_cd_nt_inputs(nt_features, lure_idx, nt_distances, n = obs$n)
+  stats::rbinom(n, size = 1, prob = 1 - .imm_cd_psame(obs, nt))
+}
+
+.imm_cd_psame <- function(obs, nt) {
+  w_target <- obs$c + obs$a
+  w_nt <- (obs$c * exp(-obs$s * nt$nt_distances) + obs$a) * nt$lure_idx
+  z <- w_target + rowSums(w_nt) + 1
+
+  half_width <- .cd_crit_angle(obs$kappa, obs$criterion, w_target / z)
+  centre <- wrap(obs$probe)
+
+  inside <- w_target * .cd_vm_arc_mass(centre, half_width, obs$kappa, obs$mu) +
+    half_width / pi
+  for (k in seq_len(ncol(nt$nt_features))) {
+    inside <- inside + w_nt[, k] *
+      .cd_vm_arc_mass(centre, half_width, obs$kappa, nt$nt_features[, k])
+  }
+
+  p_same <- inside / z
+  p_same[half_width <= 0] <- 0
+  p_same[half_width >= pi] <- 1
+  pmin(pmax(p_same, .Machine$double.eps), 1 - .Machine$double.eps)
 }
 
 #' @title Distribution functions for the Memory Measurement Model (M3)

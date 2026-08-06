@@ -70,6 +70,81 @@ check_data.circular <- function(model, data, formula) {
 }
 
 #' @export
+check_data.change_detection <- function(model, data, formula) {
+  data <- order_data_query(model, data, formula)
+
+  resp_name <- model$resp_vars$response
+  probe_name <- model$resp_vars$probe
+  target_name <- model$resp_vars$target
+
+  stopif(
+    not_in(resp_name, colnames(data)),
+    "The response variable '{resp_name}' is not present in the data."
+  )
+  stopif(
+    not_in(probe_name, colnames(data)),
+    "The probe variable '{probe_name}' is not present in the data."
+  )
+  stopif(
+    not_in(target_name, colnames(data)),
+    "The target variable '{target_name}' is not present in the data."
+  )
+
+  resp_vals <- data[[resp_name]]
+  stopif(
+    !all(resp_vals %in% c(0L, 1L, 0, 1)),
+    "The response variable '{resp_name}' must be binary (0 or 1)."
+  )
+
+  warnif(
+    max(abs(data[[probe_name]]), na.rm = TRUE) > 2 * pi,
+    "It appears your probe variable is in degrees.
+    The model requires probe values to be in radians."
+  )
+  warnif(
+    max(abs(data[[target_name]]), na.rm = TRUE) > 2 * pi,
+    "It appears your target variable is in degrees.
+    The model requires target values to be in radians."
+  )
+
+  data$probe_centered <- wrap(data[[probe_name]] - data[[target_name]])
+  attr(data, "probe_var") <- "probe_centered"
+
+  NextMethod("check_data")
+}
+
+.extract_cd_nt_data <- function(i, prep, has_distances = FALSE) {
+  if ("cd_nt_features" %in% names(prep$data)) {
+    out <- nlist(
+      nt_features = prep$data$cd_nt_features[i, ],
+      lure_idx = prep$data$cd_lure_idx[i, ]
+    )
+    if (has_distances) {
+      out$nt_distances <- prep$data$cd_nt_distances[i, ]
+    }
+    return(out)
+  }
+
+  n_vreal <- sum(grepl("^vreal[0-9]+$", names(prep$data)))
+  n_nt <- if (has_distances) (n_vreal - 1) / 2 else n_vreal - 1
+  nt_features <- vapply(seq_len(n_nt), function(j) prep$data[[paste0("vreal", j + 1)]][i], numeric(1))
+  lure_idx <- vapply(seq_len(n_nt), function(j) prep$data[[paste0("vint", j)]][i], numeric(1))
+  out <- nlist(nt_features, lure_idx)
+  if (has_distances) {
+    out$nt_distances <- vapply(seq_len(n_nt), function(j) prep$data[[paste0("vreal", n_nt + j + 1)]][i], numeric(1))
+  }
+  out
+}
+
+.extract_cd_probe <- function(i, prep) {
+  if ("probe_cd" %in% names(prep$data)) {
+    prep$data$probe_cd[i]
+  } else {
+    prep$data$vreal1[i]
+  }
+}
+
+#' @export
 check_data.non_targets <- function(model, data, formula) {
   nt_features <- model$other_vars$nt_features
   warnif(
@@ -98,6 +173,9 @@ check_data.non_targets <- function(model, data, formula) {
   data$inv_ss <- 1 / (ss_numeric - 1)
   data$inv_ss <- ifelse(is.infinite(data$inv_ss), 1, data$inv_ss)
   data[, nt_features][is.na(data[, nt_features])] <- 0
+
+  attr(data, "cd_nt_features_matrix") <- data.matrix(data[, nt_features, drop = FALSE])
+  attr(data, "cd_lure_idx_matrix") <- data.matrix(data[, lure_idx_vars, drop = FALSE])
 
   # save some variables for later use
   attr(data, "max_set_size") <- max_set_size

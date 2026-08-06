@@ -107,6 +107,7 @@ articles:
     - articles/bmm_m3
     - articles/bmm_mpt
     - articles/bmm_utility
+    - articles/bmm_vwm_change_detection
 
   - title: Signal detection & recognition
     desc: Fitting signal detection models and analysing ROC/AUC

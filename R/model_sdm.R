@@ -50,6 +50,69 @@
   out
 }
 
+
+.model_sdm_cd <- function(response = NULL, probe = NULL, target = NULL,
+                          links = NULL, version = "simple", call = NULL, ...) {
+  out <- structure(
+    list(
+      resp_vars = nlist(response, probe, target),
+      other_vars = nlist(),
+      domain = "Visual working memory",
+      task = "Change detection",
+      name = "Signal discrimination model for single-probe change detection.",
+      version = version,
+      citation = glue(
+        "Oberauer, K. (2023). Measurement models for visual working memory - \\
+        A factorial model comparison. Psychological Review, 130(3), 841-852; \\
+        Lin, H.Y., & Oberauer, K. (2022). An interference model for visual \\
+        working memory: Applications to the change detection task. \\
+        Cognitive Psychology, 133, 101463."
+      ),
+      requirements = glue(
+        "- response: binary, coded 0 = 'same' and 1 = 'change'
+        - probe: the probed feature in radians
+        - target: the feature shown at the probed location in radians"
+      ),
+      parameters = list(
+        mu = glue(
+          "Location of the memory distribution relative to the target \\
+          (in radians). Fixed internally to 0 by default."
+        ),
+        c = "Memory strength",
+        kappa = "Precision of the memory distribution",
+        criterion = glue(
+          "Decision criterion. A 'change' response is given when the \\
+          log-likelihood ratio exceeds the criterion, so larger values make \\
+          'change' responses less likely. Fixed to 0 (unbiased) by default; \\
+          supply a formula for criterion to estimate it."
+        )
+      ),
+      links = list(
+        mu = "tan_half",
+        c = "log",
+        kappa = "log",
+        criterion = "identity"
+      ),
+      fixed_parameters = list(mu = 0, criterion = 0),
+      default_priors = list(
+        mu = list(main = "student_t(1, 0, 1)"),
+        c = list(main = "student_t(5, 2, 0.75)", effects = "normal(0, 1)"),
+        kappa = list(main = "student_t(5, 1.75, 0.75)", effects = "normal(0, 1)"),
+        criterion = list(main = "normal(0, 0.5)", effects = "normal(0, 0.5)")
+      ),
+      # No init_ranges: create_initfun() matches model parameters against Stan
+      # parameter names by substring, so `c` also matches `Intercept_criterion`
+      # and the lookup returns two parameters (#354, fixed by #355). Restore
+      # them once that lands; the other change detection models set none either.
+      void_mu = FALSE
+    ),
+    class = c("bmmodel", "change_detection", "sdm_cd"),
+    call = call
+  )
+  out$links[names(links)] <- links
+  out
+}
+
 # user facing alias
 # information in the title and details sections will be filled in
 # automatically based on the information in the .model_sdm_simple(NA)$info
@@ -64,6 +127,12 @@
 #'   degrees to radians using the `deg2rad` function.
 #' @param version Character. The version of the model to use. Currently only
 #'   "simple" is supported.
+#' @param response The name of the variable in the dataset containing the binary
+#'   response (0 = "same", 1 = "change"). Required when `task = "cd"`.
+#' @param probe The name of the variable containing the probe color in radians.
+#'   Required when `task = "cd"`.
+#' @param target The name of the variable containing the target color in
+#'   radians. Required when `task = "cd"`.
 #' @param ... used internally for testing, ignore it
 #' @return An object of class `bmmodel`
 #' @export
@@ -86,18 +155,60 @@
 #'   cores = 4,
 #'   backend = "cmdstanr"
 #' )
-sdm <- function(resp_error, version = "simple", ...) {
+sdm <- function(resp_error = NULL, response = NULL, probe = NULL,
+                target = NULL, version = "simple", links = NULL, ...) {
   call <- match.call()
-  stop_missing_args()
-  .model_sdm(resp_error = resp_error, version = version, call = call, ...)
+  cd_args <- c(response, probe, target)
+  stopif(
+    is.null(resp_error) && length(cd_args) == 0,
+    "Provide either 'resp_error' for continuous reproduction, or 'response',
+    'probe' and 'target' for change detection."
+  )
+  stopif(
+    !is.null(resp_error) && length(cd_args) > 0,
+    "Provide either 'resp_error' or the change detection arguments 'response',
+    'probe' and 'target', not both."
+  )
+
+  out <- if (is.null(resp_error)) {
+    stopif(
+      length(cd_args) < 3,
+      "Change detection requires all of 'response', 'probe' and 'target'."
+    )
+    .model_sdm_cd(
+      response = response, probe = probe, target = target, version = version,
+      links = links, ...
+    )
+  } else {
+    .model_sdm(resp_error = resp_error, version = version, links = links, ...)
+  }
+  attr(out, "call") <- call
+  out
 }
 
 #' @rdname sdm
-#' @keywords deprecated
+#' @export
+sdm_de <- function(resp_error, version = "simple", links = NULL, ...) {
+  call <- match.call()
+  stop_missing_args()
+  .model_sdm(resp_error = resp_error, version = version, links = links,
+             call = call, ...)
+}
+
+#' @rdname sdm
+#' @export
+sdm_cd <- function(response, probe, target, version = "simple", links = NULL, ...) {
+  call <- match.call()
+  stop_missing_args()
+  .model_sdm_cd(response = response, probe = probe, target = target,
+                version = version, links = links, call = call, ...)
+}
+
+#' @rdname sdm
 #' @export
 sdmSimple <- function(resp_error, version = "simple", ...) {
-  warning2("The function `sdmSimple()` is deprecated. Please use `sdm()` instead.")
   call <- match.call()
+  warning2("The model name 'sdmSimple' is deprecated. Please use 'sdm' instead.")
   stop_missing_args()
   .model_sdm(resp_error = resp_error, version = version, call = call, ...)
 }
@@ -147,6 +258,60 @@ configure_model.sdm <- function(model, data, formula) {
   formula$family <- sdm_simple
 
   nlist(formula, data, stanvars)
+}
+
+#' @export
+configure_model.sdm_cd <- function(model, data, formula) {
+  family <- brms::custom_family(
+    name = "sdm_cd",
+    dpars = c("mu", "c", "kappa", "criterion"),
+    links = c("tan_half", "log", "log", "identity"),
+    lb = c(NA, 0, 0, NA),
+    ub = c(NA, NA, NA, NA),
+    type = "int",
+    vars = c("vreal1", "cd_gl_x", "cd_gl_w"),
+    loop = FALSE,
+    log_lik = log_lik_sdm_cd,
+    posterior_predict = posterior_predict_sdm_cd
+  )
+
+  stanvars <- .cd_stanvars(model, "sdm_cd_funs.stan")
+
+  formula <- bmf2bf(model, formula)
+  formula$family <- family
+
+  nlist(formula, data, stanvars)
+}
+
+#' @export
+bmf2bf.sdm_cd <- function(model, formula = bmmformula()) {
+  brms::bf(glue(
+    "{model$resp_vars$response} | vreal(probe_centered) ~ {.extract_mu_rhs(formula)}"
+  ))
+}
+
+log_lik_sdm_cd <- function(i, prep) {
+  dsdm_cd(
+    prep$data$Y[i],
+    prep$data$vreal1[i],
+    c = brms::get_dpar(prep, "c", i = i),
+    kappa = brms::get_dpar(prep, "kappa", i = i),
+    criterion = brms::get_dpar(prep, "criterion", i = i),
+    mu = brms::get_dpar(prep, "mu", i = i),
+    log = TRUE
+  )
+}
+
+posterior_predict_sdm_cd <- function(i, prep, ...) {
+  c_par <- brms::get_dpar(prep, "c", i = i)
+  rsdm_cd(
+    length(c_par),
+    prep$data$vreal1[i],
+    c = c_par,
+    kappa = brms::get_dpar(prep, "kappa", i = i),
+    criterion = brms::get_dpar(prep, "criterion", i = i),
+    mu = brms::get_dpar(prep, "mu", i = i)
+  )
 }
 
 ############################################################################# !
