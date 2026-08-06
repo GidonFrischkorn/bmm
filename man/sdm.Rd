@@ -41,6 +41,8 @@ radians. Required when \code{task = "cd"}.}
 \item{version}{Character. The version of the model to use. Currently only
 "simple" is supported.}
 
+\item{links}{A list of links for the model parameters}
+
 \item{...}{used internally for testing, ignore it}
 }
 \value{

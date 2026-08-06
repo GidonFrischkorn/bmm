@@ -37,6 +37,7 @@ Imports:
     stats,
     withr
 Suggests:
+    BH,
     bookdown,
     cmdstanr (>= 0.7.0),
     cowplot,
@@ -48,6 +49,7 @@ Suggests:
     knitr,
     mixtur,
     MPTinR,
+    RcppEigen,
     remotes,
     rmarkdown,
     rstan,
@@ -64,4 +66,4 @@ Config/Needs/website: rmarkdown
 Encoding: UTF-8
 LazyData: true
 Roxygen: list(markdown = TRUE)
-Config/roxygen2/version: 8.0.0
+Config/roxygen2/version: 8.1.0

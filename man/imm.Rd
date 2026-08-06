@@ -90,6 +90,8 @@ columns in the dataset.}
 \item{version}{Character. The version of the IMM model to use. Can be one of
 \code{full}, \code{bsc}, or \code{abc}. The default is \code{full}.}
 
+\item{links}{A list of links for the model parameters}
+
 \item{...}{used internally for testing, ignore it}
 }
 \value{

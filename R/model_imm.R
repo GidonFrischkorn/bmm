@@ -194,6 +194,7 @@
 #'   Required when `task = "cd"`.
 #' @param target The name of the variable containing the target color in
 #'   radians. Required when `task = "cd"`.
+#' @param links A list of links for the model parameters
 #' @param ... used internally for testing, ignore it
 #' @return An object of class `bmmodel`
 #' @keywords bmmodel

@@ -78,6 +78,8 @@
  test_that("RDM Stan fixed-sp wrapper matches R likelihood for simple grids", {
    skip_on_cran()
    skip_if_not_installed("rstan")
+   skip_if_not_installed("BH")
+   skip_if_not_installed("RcppEigen")
 
    .rdm_expose_stan_functions("simple_fixed")
 
@@ -124,6 +126,8 @@
  test_that("RDM Stan free-sp wrapper matches R likelihood for simple grids", {
    skip_on_cran()
    skip_if_not_installed("rstan")
+   skip_if_not_installed("BH")
+   skip_if_not_installed("RcppEigen")
 
    .rdm_expose_stan_functions("simple_free")
 
@@ -172,6 +176,8 @@
  test_that("RDM Stan free-sp wrapper matches R likelihood for custom grids", {
    skip_on_cran()
    skip_if_not_installed("rstan")
+   skip_if_not_installed("BH")
+   skip_if_not_installed("RcppEigen")
 
    .rdm_expose_stan_functions("custom_free")
 
