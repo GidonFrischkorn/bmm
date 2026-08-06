@@ -4,6 +4,8 @@
 * Fix `.pwald()` returning `NaN`/`-Inf` in the upper tail of the shifted-Wald survival function, which propagated to `dcswald()` (and therefore `log_lik`/`posterior_predict`) for the **cswald** model at extreme reaction times. The R-side survival now uses the stable `log_diff_exp` form already used by the Stan likelihood (`swald_lccdf`) (#376).
 * Fix initial values being set in two places, where the `init` returned by `configure_model()` was silently overwritten by `create_initfun()`. This caused the **m3** model's intended `init = 0` (needed for stable sampling with the `simple` choice rule and an `identity` link) to be lost, and left dead `init` code in the **sdm** model. `create_initfun()` is now the single source of truth for initial values, with model-specific behaviour expressed through S3 methods (#375).
 * Fix default prior construction for more complex `bmmformula` specifications: formulas with multiple predictors and no intercept (e.g. `kappa ~ 0 + A + B`) previously left all but the first predictor with flat priors, and interaction-only formulas with an intercept (e.g. `kappa ~ 1 + A:B`) left the interaction terms with flat priors instead of inheriting the effects prior (#305).
+* `create_initfun()` now matches Stan parameters to model parameters with a word-boundary regex (`(^|_)param(_|$)`) instead of a substring match, preventing collisions in models with short parameter names (e.g. `s`, `c`, `a`) that are substrings of longer ones (`sim`, `correct`, `activation`); the longest (most specific) match is selected when several apply (#354, #355).
+* `create_initfun()` now resolves initialization terms from `nlpars` when a model parameter is not a distributional parameter, so models built as non-linear brms formulas (e.g. native-multinomial models whose parameters live in `bterms$nlpars`) no longer error with `no applicable method for 'has_intercept' applied to an object of class "NULL"` (#362).
 
 ### Other changes
 * Added an internal consistency check in `configure_prior()`: if a model's `fixed_parameters` includes a parameter that its `configure_model()` never wires into the formula (neither a dpar nor an nlpar), bmm now fails with a clear model-definition error instead of letting a malformed `b_Intercept ~ constant()` prior reach `brm()`. This is a safety net for model development; it cannot be reached through the normal `bmm()` interface, where an unrecognized parameter is already caught earlier by `check_formula()` (#377).
@@ -16,10 +18,6 @@
 
 ### Other changes
 * The **ddm** model supports both `cmdstanr` and `rstan` backends. Previously, `cmdstanr` was required.
-
-### Bug fixes
-* `create_initfun()` now matches Stan parameters to model parameters with a word-boundary regex (`(^|_)param(_|$)`) instead of a substring match, preventing collisions in models with short parameter names (e.g. `s`, `c`, `a`) that are substrings of longer ones (`sim`, `correct`, `activation`); the longest (most specific) match is selected when several apply (#354, #355).
-* `create_initfun()` now resolves initialization terms from `nlpars` when a model parameter is not a distributional parameter, so models built as non-linear brms formulas (e.g. native-multinomial models whose parameters live in `bterms$nlpars`) no longer error with `no applicable method for 'has_intercept' applied to an object of class "NULL"` (#362).
 
 # bmm 1.3.0
 
