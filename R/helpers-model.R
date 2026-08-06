@@ -126,6 +126,7 @@ check_model.default <- function(model, data = NULL, formula = NULL) {
 }
 
 # internal terminal method for validated bmmodel subclasses
+#' @exportS3Method
 check_model.validated_bmmodel <- function(model, data = NULL, formula = NULL) {
   model
 }
