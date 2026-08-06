@@ -22,6 +22,14 @@ CRAN release: 2026-06-05
   response time equals non-decision time in the **cswald** model.
   Previously returned `-Inf` instead of `0` (log of survival = 1)
   ([\#348](https://github.com/venpopov/bmm/issues/348)).
+- Fix [`print()`](https://rdrr.io/r/base/print.html) for model summaries
+  selecting regression-coefficient rows by an unanchored substring
+  match, so a parameter such as `a` could pull in rows of another
+  parameter like `kappa` (e.g. in the **imm** model). Rows are now
+  matched on the exact parameter prefix. This also fixes a crash when
+  only a single coefficient row is shown
+  ([\#379](https://github.com/venpopov/bmm/issues/379),
+  [\#369](https://github.com/venpopov/bmm/issues/369)).
 
 #### Other changes
 
