@@ -52,7 +52,8 @@ create_initfun.default <- function(model, data, formula) {
       range <- init_ranges[[parameter]]
       link <- links[[parameter]]
 
-      # non-linear model parameters live in nlpars, custom-family ones in dpars
+      # non-linear model parameters live in nlpars (e.g. sdt_rating, sdt_ranking),
+      # custom-family ones in dpars
       par_terms <- bterms$dpars[[parameter]] %||% bterms$nlpars[[parameter]]
 
       # Handle different parameter types

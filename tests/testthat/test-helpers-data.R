@@ -143,28 +143,41 @@ test_that("check_var_set_size rejects invalid input", {
 })
 
 test_that("check_data() returns a data.frame()", {
-  mls <- lapply(supported_models(print_call = FALSE), get_model)
+  # sdt_rating needs one response column per rating category plus n_ratings, so
+  # it cannot be exercised with the shared single `response` column used here; it
+  # is covered with proper count data in test-model_sdt_rating.R.
+  model_names <- setdiff(supported_models(print_call = FALSE), "sdt_rating")
+  mls <- lapply(model_names, get_model)
   # test data includes variables for all model types:
   # - y, x, z, w, l, s for circular/mixture models
   # - mean_rt, var_rt, n_upper, n_trials for ezdm 3par
   # - mean_rt_upper/lower, var_rt_upper/lower for ezdm 4par
+  # - stimulus (0/1) for sdt_binary (response counts come from `response`)
+  # - rank1, rank2 for sdt_ranking (wide rank-frequency count columns)
   # Use 50 rows to avoid small sample size warnings from cswald
   test_data <- data.frame(
-    y = rep(1, 50), x = rep(1, 50), z = rep(2, 50), w = rep(1, 50), 
+    y = rep(1, 50), x = rep(1, 50), z = rep(2, 50), w = rep(1, 50),
     s = rep(2, 50), l = rep(1, 50),
-    mean_rt = rep(0.5, 50), var_rt = rep(0.02, 50), 
+    mean_rt = rep(0.5, 50), var_rt = rep(0.02, 50),
     n_upper = rep(80, 50), n_trials = rep(100, 50),
     mean_rt_upper = rep(0.45, 50), mean_rt_lower = rep(0.55, 50),
     var_rt_upper = rep(0.018, 50), var_rt_lower = rep(0.025, 50),
-    rt = rep(0.6, 50), response = rep(1, 50)
+    rt = rep(0.6, 50), response = rep(1, 50),
+    stimulus = rep(c(0L, 1L), 25), rank1 = rep(30L, 50), rank2 = rep(20L, 50)
   )
   for (ml in mls) {
     model <- ml(
       resp_error = "y", nt_features = "x", set_size = 2,
       nt_distances = "z", resp_cats = c("w", "l"), num_options = c(1, 1),
       mean_rt = "mean_rt", var_rt = "var_rt", n_upper = "n_upper",
-      n_trials = "n_trials", rt = "rt", response = "response"
+      n_trials = "n_trials", rt = "rt", response = "response",
+      stimulus = "stimulus", rank = "rank", m = 2
     )
+    # sdt_ranking takes a wide multi-column response, unlike the single
+    # `response` column shared by the other count models.
+    if (inherits(model, "sdt_ranking")) {
+      model <- ml(response = c("rank1", "rank2"), m = 2)
+    }
     expect_s3_class(
       check_data(model, test_data, bmf(kappa ~ 1)),
       "data.frame"

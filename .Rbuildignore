@@ -5,6 +5,7 @@
 ^cran-comments\.md$
 ^local$
 ^bmm-dev$
+^data-raw$
 ^.github$
 ^\.github$
 ^_pkgdown\.yml$
@@ -24,3 +25,4 @@
 ^AGENTS.md$
 ^code-structure.md$
 ^\.lintr$
+^\.claude$
