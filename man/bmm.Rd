@@ -118,6 +118,7 @@ The following models are supported:
 \item sdt_mafc(response, n_trials, m, dist, links)
 \item sdt_ranking(response, m, dist, links)
 \item sdt_rating(response, stimulus, n_ratings, dist, threshold_type, version, links)
+\item utility(resp_cats, num_options, payoffs, value_cols, utility_fn, weighting, choice_rule, numeraire)
 }
 
 Type  ?modelname  to get information about a specific model, e.g.  ?imm
