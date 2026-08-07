@@ -114,7 +114,7 @@ The following models are supported:
 \item mixture2p_cd(response, probe, target, links)
 \item mixture3p(resp_error, nt_features, set_size, response, probe, target, regex, links)
 \item mixture3p_cd(response, probe, target, nt_features, set_size, regex, links)
-\item mpt(trees, condition, covariates, simplex, links)
+\item mpt(trees, tree_id, covariates, simplex, links)
 \item rdm(rt, response, n_choices, version, accumulators, links)
 \item sdm(resp_error, response, probe, target, version, links)
 \item sdm_cd(response, probe, target, version, links)
