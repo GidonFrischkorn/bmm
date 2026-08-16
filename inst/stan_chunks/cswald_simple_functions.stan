@@ -1,24 +1,39 @@
 // log-PDF of the censored shifted Wald model
-real cswald_lpdf(real rt, real mu, real drift, real bound, real ndt, real s, int response) {
+real cswald_lpdf(real rt, real mu, real drift, real bound, real ndt, real s,
+                 real sndt, int response) {
   if (response == 1) {
-    return swald_lpdf(rt | drift, bound, ndt, s);
+    return swald_sndt_lpdf(rt | drift, bound, ndt, sndt, s);
   } else {
-    return swald_lccdf(rt | drift, bound, ndt, s);
+    return swald_sndt_lccdf(rt | drift, bound, ndt, sndt, s);
   }
 }
 
-// vectorized overload used as the loop = FALSE family: returns the summed
-// log-likelihood over all observations. Observed responses take the vectorized
-// closed-form density, censored responses the vectorized survivor; both come
-// from the shared helpers so the algebra has a single home
+// vectorized overload used as the loop = FALSE family, which configure_model
+// selects only while sndt is fixed at 0: observed responses take the vectorized
+// closed-form density, censored responses the vectorized survivor, both from
+// the shared helpers. A non-zero sndt would make the convolution lccdf-bound,
+// where the per-observation loop is faster, so it delegates to the scalar form
 real cswald_lpdf(vector rt, vector mu, vector drift, vector bound,
-                 vector ndt, vector s, array[] int dec) {
+                 vector ndt, vector s, vector sndt, array[] int dec) {
   int N = rows(rt);
+  real lp = 0;
+
+  if (min(sndt) < 0) return negative_infinity();
+  if (max(sndt) >= 1e-8) {
+    for (n in 1:N) {
+      if (dec[n] == 1) {
+        lp += swald_sndt_lpdf(rt[n] | drift[n], bound[n], ndt[n], sndt[n], s[n]);
+      } else {
+        lp += swald_sndt_lccdf(rt[n] | drift[n], bound[n], ndt[n], sndt[n], s[n]);
+      }
+    }
+    return lp;
+  }
+
   array[N] int idx1;
   array[N] int idx0;
   int n1 = 0;
   int n0 = 0;
-  real lp = 0;
 
   for (n in 1:N) {
     if (dec[n] == 1) {

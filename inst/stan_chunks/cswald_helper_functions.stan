@@ -96,3 +96,116 @@ vector swald_log_surv_vec(vector t, vector drift, vector bound, vector sigma) {
   }
   return out;
 }
+
+// log-CDF of the shifted Wald: F_W(t) = Phi(z1) + exp(c) * Phi(z2), a sum of
+// two log-space terms and therefore stable at any gap between them
+real swald_lcdf(real rt, real drift, real bound, real ndt, real sigma) {
+  real t_shifted = rt - ndt;
+  if (t_shifted <= 0) return negative_infinity();
+
+  real sigma_sqrt_t = sigma * sqrt(t_shifted);
+  real z1 = (drift * t_shifted - bound) / sigma_sqrt_t;
+  real z2 = -(drift * t_shifted + bound) / sigma_sqrt_t;
+  real log_c = 2 * bound * drift / square(sigma);
+
+  return log_sum_exp(std_normal_lcdf(z1 | ), log_c + std_normal_lcdf(z2 | ));
+}
+
+// G(x) = int_0^x S_W(u) du = x * S_W(x) + M1(x), extended by G(x) = x for
+// x <= 0 where S_W = 1, which lets the convolution below cover the
+// partial-support strip without a special case. M1(x) = int_0^x u f_W(u) du is
+// the partial expectation of the (possibly defective) Wald. Mirrors .gwald()
+// in R/distributions.R; the survivor is taken from swald_lccdf so that both
+// implementations reach it by the same log-space route
+real swald_gint(real x, real drift, real bound, real sigma) {
+  if (x <= 0) return x;
+
+  real sigma_sq = square(sigma);
+  real sqrt_x = sqrt(x);
+  real dx = drift * x;
+  real z1 = (dx - bound) / (sigma * sqrt_x);
+  real z2 = -(dx + bound) / (sigma * sqrt_x);
+  real q = exp(2 * bound * drift / sigma_sq + std_normal_lcdf(z2 | ));
+  real m1;
+
+  if (abs(drift) < 1e-6 * sigma_sq / bound) {
+    // mu = bound / drift diverges as drift -> 0 while the Phi-bracket vanishes;
+    // use the exact drift = 0 limit of M1 instead of the 0 * inf cancellation
+    real w = bound / (sigma * sqrt_x);
+    m1 = 2 * bound * (sqrt_x * exp(std_normal_lpdf(w | )) / sigma
+                      - (bound / sigma_sq) * Phi(-w));
+  } else {
+    m1 = (bound / drift) * (Phi(z1) - q);
+  }
+
+  return x * exp(swald_lccdf(x | drift, bound, 0, sigma)) + m1;
+}
+
+// log of (1/sndt) * int_{x-sndt}^{x} S_W(u) du by composite Simpson on four
+// intervals, evaluated in log space. Every Simpson weight is positive, so this
+// cannot cancel however deep the tail gets; it is the recovery path for the
+// G-difference below. Mirrors .simpson_log_mean() in R/distributions.R
+real swald_log_surv_mean(real x, real drift, real bound, real sigma, real sndt) {
+  vector[5] weights = log(to_vector({1, 4, 2, 4, 1}) / 12);
+  vector[5] terms;
+  for (k in 1:5) {
+    terms[k] = swald_lccdf(x - sndt + (k - 1) * sndt / 4 | drift, bound, 0, sigma)
+               + weights[k];
+  }
+  return log_sum_exp(terms);
+}
+
+// log-PDF of the shifted Wald with uniform trial-to-trial variability in the
+// non-decision time, onset convention NDT ~ uniform(ndt, ndt + sndt):
+// f(t) = [S_W(t - ndt - sndt) - S_W(t - ndt)] / sndt (Miller et al. 2018, Eq. 6)
+real swald_sndt_lpdf(real rt, real drift, real bound, real ndt, real sndt, real sigma) {
+  if (sndt < 0) return negative_infinity();
+  // the convolution is continuous at sndt = 0, so tiny sndt takes the plain
+  // density (this is also the path for the default fixed sndt = 0)
+  if (sndt < 1e-8) return swald_lpdf(rt | drift, bound, ndt, sigma);
+
+  real t1 = rt - ndt;
+  if (t1 <= 0) return negative_infinity();
+
+  // strip ndt < rt <= ndt + sndt: the earlier survivor is exactly 1, so the
+  // density reduces to F_W(t1) / sndt. The log-CDF is stable at any gap; the
+  // survivor route log_diff_exp(0, log S(t1)) returns -inf once log S(t1)
+  // ~ -F(t1) underflows below the smallest subnormal, although the true log
+  // density ~ -bound^2 / (2 sigma^2 t1) is still perfectly representable
+  if (t1 <= sndt) return swald_lcdf(rt | drift, bound, ndt, sigma) - log(sndt);
+
+  real surv_early = swald_lccdf(rt | drift, bound, ndt + sndt, sigma);
+  real surv_late = swald_lccdf(rt | drift, bound, ndt, sigma);
+
+  // for defective (negative-drift) accumulators both survivors converge to the
+  // same positive constant in the deep tail, so their log-difference drops
+  // below fp precision; the midpoint rule is second order in sndt and stable
+  if (surv_early - surv_late < 1e-8) {
+    return swald_lpdf(rt | drift, bound, ndt + sndt / 2, sigma);
+  }
+  return swald_log_diff_exp(surv_early, surv_late) - log(sndt);
+}
+
+// log survivor of the shifted Wald + uniform NDT, for censored observations:
+// S_conv(t) = [G(x1) - G(x1 - sndt)] / sndt with x1 = t - ndt. Once that
+// difference falls below 1e-8 of the terms themselves it has lost half its
+// mantissa and log() of it is noise -- non-monotone in t, with a gradient that
+// is zero or garbage -- so the Simpson route recovers the same integral
+// without cancelling. An absolute floor would admit hundreds of nats of that
+// noise before firing
+real swald_sndt_lccdf(real rt, real drift, real bound, real ndt, real sndt, real sigma) {
+  if (sndt < 0) return negative_infinity();
+  if (sndt < 1e-8) return swald_lccdf(rt | drift, bound, ndt, sigma);
+
+  real x1 = rt - ndt;
+  if (x1 <= 0) return 0;
+
+  real g_hi = swald_gint(x1, drift, bound, sigma);
+  real g_lo = swald_gint(x1 - sndt, drift, bound, sigma);
+  real delta = g_hi - g_lo;
+
+  if (delta <= 1e-8 * fmax(abs(g_hi), abs(g_lo))) {
+    return swald_log_surv_mean(x1, drift, bound, sigma, sndt);
+  }
+  return log(delta / sndt);
+}

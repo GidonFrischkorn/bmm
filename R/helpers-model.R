@@ -176,6 +176,31 @@ update_model_fixed_parameters <- function(model, formula) {
   if (length(overwrite) > 0) {
     model$fixed_parameters[overwrite] <- NULL
   }
+
+  resolve_fixed_links(model)
+}
+
+# A fixed value is a constant() prior on the LINK scale, so a parameter whose
+# natural-scale constant is not representable under its estimation link -- a
+# variability parameter fixed at 0 under a log link, where constant(0) would
+# silently mean exp(0) = 1 -- declares in links_fixed the link to use while it
+# stays fixed. Resolving it into model$links, rather than patching the family in
+# configure_model(), keeps the one thing parameters(), print() and summary()
+# read true of the model as built.
+#
+# The estimation links are kept aside so this stays reversible: a parameter the
+# user later predicts must get its own link back, not keep the fixed-scale one.
+resolve_fixed_links <- function(model) {
+  pars <- names(model$links_fixed)
+  if (length(pars) == 0) {
+    return(model)
+  }
+  estimated <- attr(model, "links_estimated") %||% model$links[pars]
+  attr(model, "links_estimated") <- estimated
+
+  model$links[pars] <- estimated[pars]
+  fixed_now <- intersect(pars, names(model$fixed_parameters))
+  model$links[fixed_now] <- model$links_fixed[fixed_now]
   model
 }
 
