@@ -315,31 +315,39 @@ bmf2bf.cswald <- function(model, formula) {
 # CONFIGURE_MODEL S3 METHODS                                             ####
 ############################################################################# !
 
+# The cswald families use loop = FALSE, and brms slices only Y inside
+# partial_log_lik -- `vars` is spliced in whole. A bare "dec" would therefore
+# pair each thread's Y slice with dec[1:N_slice] from the top of the data, so
+# the threaded form has to slice itself. start/end exist only inside the
+# threaded partial_log_lik, so "dec[start:end]" cannot be emitted without it.
+cswald_decision_var <- function() {
+  threads <- getOption("brms.threads", NULL)
+  # brms accepts a bare number for this option, so normalize it the same way
+  # brms::validate_threads() does; force = TRUE means "compile with threading
+  # but leave the generated code alone", which is exactly when NOT to slice
+  if (is.numeric(threads)) {
+    threads <- brms::threading(threads)
+  }
+  threaded <- is.list(threads) && isTRUE(threads$threads > 0) && !isTRUE(threads$force)
+  if (threaded) "dec[start:end]" else "dec"
+}
+
 #' @export
 configure_model.cswald_simple <- function(model, data, formula) {
   links <- model$links
   formula <- bmf2bf(model, formula)
 
-  cswald_family <- function(link_drift, link_bound, link_ndt, link_s) {
-    brms::custom_family(
-      "cswald",
-      dpars = c("mu", "drift", "bound", "ndt", "s"),
-      links = c("identity", link_drift, link_bound, link_ndt, link_s),
-      ub = c(NA, NA, NA, NA, NA),
-      lb = c(NA, 0, 0, 0, 0),
-      type = "real",
-      vars = "dec[n]",
-      loop = TRUE,
-      log_lik = log_lik_cswald_simple,
-      posterior_predict = posterior_predict_cswald_simple
-    )
-  }
-
-  formula$family <- cswald_family(
-    link_drift = links$drift,
-    link_bound = links$bound,
-    link_ndt = links$ndt,
-    link_s = links$s
+  formula$family <- brms::custom_family(
+    "cswald",
+    dpars = c("mu", "drift", "bound", "ndt", "s"),
+    links = c("identity", links$drift, links$bound, links$ndt, links$s),
+    ub = c(NA, NA, NA, NA, NA),
+    lb = c(NA, 0, 0, 0, 0),
+    type = "real",
+    vars = cswald_decision_var(),
+    loop = FALSE,
+    log_lik = log_lik_cswald_simple,
+    posterior_predict = posterior_predict_cswald_simple
   )
 
   sc_path <- system.file("stan_chunks", package = "bmm")
@@ -393,26 +401,17 @@ configure_model.cswald_crisk <- function(model, data, formula) {
   links <- model$links
   formula <- bmf2bf(model, formula)
 
-  cswald_crisk_family <- function(link_drift, link_bound, link_ndt, link_zr, link_s) {
-    brms::custom_family(
-      "cswald_crisk",
-      dpars = c("mu", "drift", "bound", "ndt", "zr", "s"),
-      links = c("identity", link_drift, link_bound, link_ndt, link_zr, link_s),
-      ub = c(NA, NA, NA, NA, 1, NA),
-      lb = c(NA, NA, 0, 0, 0, 0),
-      type = "real",
-      vars = "dec[n]",
-      loop = TRUE,
-      log_lik = log_lik_cswald_crisk,
-      posterior_predict = posterior_predict_cswald_crisk
-    )
-  }
-  formula$family <- cswald_crisk_family(
-    link_drift = links$drift,
-    link_bound = links$bound,
-    link_ndt = links$ndt,
-    link_zr = links$zr,
-    link_s = links$s
+  formula$family <- brms::custom_family(
+    "cswald_crisk",
+    dpars = c("mu", "drift", "bound", "ndt", "zr", "s"),
+    links = c("identity", links$drift, links$bound, links$ndt, links$zr, links$s),
+    ub = c(NA, NA, NA, NA, 1, NA),
+    lb = c(NA, NA, 0, 0, 0, 0),
+    type = "real",
+    vars = cswald_decision_var(),
+    loop = FALSE,
+    log_lik = log_lik_cswald_crisk,
+    posterior_predict = posterior_predict_cswald_crisk
   )
 
   sc_path <- system.file("stan_chunks", package = "bmm")
