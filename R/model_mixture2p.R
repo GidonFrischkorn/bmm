@@ -37,8 +37,7 @@
         mu1 = list(main = "student_t(1, 0, 1)", effects = "normal(0,1)"),
         kappa = list(main = "normal(2, 1)", effects = "normal(0, 1)"),
         thetat = list(main = "logistic(0, 1)", effects = "normal(0, 0.5)")
-      ),
-      void_mu = FALSE
+      )
     ),
     class = c("bmmodel", "circular", "mixture2p"),
     call = call
@@ -95,8 +94,7 @@
         kappa = list(main = "normal(2, 1)", effects = "normal(0, 1)"),
         thetat = list(main = "logistic(0, 1)"),
         criterion = list(main = "normal(0, 0.5)", effects = "normal(0, 0.5)")
-      ),
-      void_mu = FALSE
+      )
     ),
     class = c("bmmodel", "change_detection", "mixture2p_cd"),
     call = call

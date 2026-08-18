@@ -108,8 +108,7 @@
       links = vt[["links"]],
       fixed_parameters = vt[["fixed_parameters"]],
       default_priors = vt[["priors"]],
-      init_ranges = vt[["init_ranges"]],
-      void_mu = TRUE
+      init_ranges = vt[["init_ranges"]]
     ),
     class = c("bmmodel", "lnr", paste0("lnr_", version)),
     call = call

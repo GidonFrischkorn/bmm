@@ -131,8 +131,7 @@
         c = list(main = "normal(0, 1)", effects = "normal(0, 1)"),
         s = list(main = "normal(0, 1)", effects = "normal(0, 1)"),
         criterion = list(main = "normal(0, 0.5)", effects = "normal(0, 0.5)")
-      ),
-      void_mu = FALSE
+      )
     ),
     regex = regex,
     regex_vars = c("nt_features", "nt_distances"),

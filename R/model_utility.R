@@ -64,8 +64,7 @@
       parameters = pars$parameters,
       fixed_parameters = setNames(list(num_value), num_name),
       links = pars$links,
-      default_priors = pars$default_priors,
-      void_mu = FALSE
+      default_priors = pars$default_priors
     ),
     class = c("bmmodel", "utility", paste0("utility_", token)),
     call = call

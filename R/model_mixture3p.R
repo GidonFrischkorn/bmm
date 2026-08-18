@@ -45,8 +45,7 @@
         kappa = list(main = "normal(2, 1)", effects = "normal(0, 1)"),
         thetat = list(main = "logistic(0, 1)", effects = "normal(0, 0.5)"),
         thetant = list(main = "logistic(0, 1)", effects = "normal(0, 0.5)")
-      ),
-      void_mu = FALSE
+      )
     ),
     class = c("bmmodel", "circular", "non_targets", "mixture3p"),
     call = call,
@@ -112,8 +111,7 @@
         thetat = list(main = "logistic(0, 1)"),
         thetant = list(main = "logistic(0, 1)"),
         criterion = list(main = "normal(0, 0.5)", effects = "normal(0, 0.5)")
-      ),
-      void_mu = FALSE
+      )
     ),
     class = c("bmmodel", "change_detection", "non_targets", "mixture3p_cd"),
     call = call,

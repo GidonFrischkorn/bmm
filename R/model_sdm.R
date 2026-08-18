@@ -98,12 +98,11 @@
         c = list(main = "student_t(5, 2, 0.75)", effects = "normal(0, 1)"),
         kappa = list(main = "student_t(5, 1.75, 0.75)", effects = "normal(0, 1)"),
         criterion = list(main = "normal(0, 0.5)", effects = "normal(0, 0.5)")
-      ),
+      )
       # No init_ranges: create_initfun() matches model parameters against Stan
       # parameter names by substring, so `c` also matches `Intercept_criterion`
       # and the lookup returns two parameters (#354, fixed by #355). Restore
       # them once that lands; the other change detection models set none either.
-      void_mu = FALSE
     ),
     class = c("bmmodel", "change_detection", "sdm_cd"),
     call = call
