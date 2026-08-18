@@ -26,11 +26,12 @@ if available. For multinomial models, facets by the named predictor. For
 the \code{\link[=sdt_rating]{sdt_rating()}} model \code{group} defaults to the \code{stimulus} variable so the
 signal and noise rating distributions are checked separately; pass
 \code{group = NA} to pool them into a single profile. The \code{\link[=sdt_ranking]{sdt_ranking()}} model
-facets by rank position; for mixed set sizes, pass the set-size column as
-\code{group} so each facet has a homogeneous denominator. The custom-family
-models \code{\link[=sdt_binary]{sdt_binary()}} and \code{\link[=sdt_mafc]{sdt_mafc()}} delegate to \code{\link[brms:pp_check]{brms::pp_check()}}; for
+shows the rank positions as the categories of the proportion profile; for
+mixed set sizes, pass the set-size column as \code{group} so each facet has a
+homogeneous denominator. The custom-family
+models \code{\link[=sdt_yn]{sdt_yn()}} and \code{\link[=sdt_mafc]{sdt_mafc()}} delegate to \code{\link[brms:pp_check]{brms::pp_check()}}; for
 their aggregated counts an overlaid empirical CDF (\code{type = "ecdf_overlay"},
-adding \code{group = "stimulus"} for \code{\link[=sdt_binary]{sdt_binary()}}) is usually clearer than the
+adding \code{group = "stimulus"} for \code{\link[=sdt_yn]{sdt_yn()}}) is usually clearer than the
 default bar view.}
 
 \item{...}{Additional arguments forwarded to \code{\link[brms:pp_check]{brms::pp_check()}} (non-multinomial)

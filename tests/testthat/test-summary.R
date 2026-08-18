@@ -66,3 +66,21 @@ test_that("print.bmmsummary handles a single regression coefficient row (#369)",
   out <- capture.output(print(make_bmmsummary(model, formula, fixed), color = FALSE))
   expect_true(any(grepl("kappa_Intercept", out)))
 })
+
+test_that(".summary_fixed_rows keeps a single fixed-effect row", {
+  # gumbel-min sdt_ranking has one population coefficient (d_Intercept) but
+  # two printed parameters (d, sdratio); the old sapply+apply errored here.
+  one_row <- data.frame(Estimate = 0.6, Rhat = 1, row.names = "d_Intercept")
+  out <- .summary_fixed_rows(one_row, c("d", "sdratio"))
+  expect_s3_class(out, "data.frame")
+  expect_identical(rownames(out), "d_Intercept")
+})
+
+test_that(".summary_fixed_rows selects all rows matching the printed parameters", {
+  fixed <- data.frame(
+    Estimate = 1:3, Rhat = c(1, NA, 1),
+    row.names = c("d_Intercept", "sdratio_Intercept", "nuisance_Intercept")
+  )
+  out <- .summary_fixed_rows(fixed, c("d", "sdratio"))
+  expect_identical(sort(rownames(out)), c("d_Intercept", "sdratio_Intercept"))
+})

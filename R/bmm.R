@@ -139,6 +139,7 @@ bmm <- function(formula, data, model,
 
   deprecated_args(...)
   dots <- list(...)
+  local_brms_threads(dots)
 
   # check if the model has been previously fit and return it if requested
   x <- try_read_bmmfit(file, file_refit)
