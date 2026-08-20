@@ -18,8 +18,8 @@ automatically.}
 
 \item{links}{A named list of link functions for the model parameters.
 Available parameters depend on the version: "simple" has \code{drift}, \code{bound},
-\code{ndt}, and \code{s}; "crisk" additionally has \code{zr}. Default links are "log" for
-most parameters and "logit" for \code{zr}. For positive parameters, "softplus"
+\code{ndt}, \code{s}, and \code{sndt}; "crisk" additionally has \code{zr}. Default links are
+"log" for most parameters and "logit" for \code{zr}. For positive parameters, "softplus"
 is available as an alternative to "log" that grows linearly for large
 values and avoids the numerical blow-up of \code{exp()}.}
 
@@ -75,17 +75,19 @@ for Choice Response Times. Applied Psychological Measurement, 42(2), 116-135. ht
 \itemize{
 \item \code{drift}: drift rate
 \item \code{bound}: boundary (distance from starting point to correct boundary)
-\item \code{ndt}: non-decision time
+\item \code{ndt}: non-decision time (minimum non-decision time when sndt > 0)
 \item \code{s}: diffusion constant
+\item \code{sndt}: range of the uniform trial-to-trial variability in the non-decision time
 }
 \item \strong{Fixed parameters:}
 \itemize{
 \item \code{mu} = 0
 \item \code{s} = 0
+\item \code{sndt} = 0
 }
 \item \strong{Default parameter links:}
 \itemize{
-\item drift = log; bound = log; ndt = log; s = log
+\item drift = log; bound = log; ndt = log; s = log; sndt = identity
 }
 \item \strong{Default priors:}
 \itemize{
@@ -109,9 +111,90 @@ for Choice Response Times. Applied Psychological Measurement, 42(2), 116-135. ht
 \item \code{main}: normal(0,0.3)
 \item \code{effects}: normal(0,0.2)
 }
+\item \code{sndt}:
+\itemize{
+\item \code{main}: normal(-2.5,1)
+\item \code{effects}: normal(0,0.3)
 }
 }
 }
+}
+\section{Trial-to-trial variability in the non-decision time}{
+
+
+Both versions include an optional parameter \code{sndt} for uniform
+trial-to-trial variability in the non-decision time: the non-decision time
+is distributed as \code{Uniform(ndt, ndt + sndt)}, so \code{ndt} is the \emph{minimum}
+non-decision time and the mean non-decision time is \code{ndt + sndt/2}. It
+corresponds to the \code{st0} parameter of \code{\link[rtdists:rdiffusion]{rtdists::rdiffusion()}}. (fast-dm
+uses the same name for a uniform of the same width, but centers it on
+\code{t0}, so its \code{t0} is the mean rather than the minimum.)
+
+By default \code{sndt} is fixed to 0, which reproduces the standard censored
+shifted Wald model exactly. To estimate it, add a formula for \code{sndt}
+(e.g. \code{bmf(..., sndt ~ 1)}); to fix it at a different value, supply a
+constant in seconds (e.g. \code{bmf(..., sndt = 0.15)}). Fixed values are given
+on the natural scale, in seconds; \code{sndt} switches to a log link only once
+it is estimated.
+
+Without \code{sndt}, a handful of fast response times caps the entire \code{ndt}
+estimate (the likelihood requires \code{ndt < min(rt)}), which biases \code{ndt},
+\code{drift}, and \code{bound} when the generating process has variable non-decision
+times (Miller et al., 2017, Fig. 3). Estimating \code{sndt} removes this bias.
+Note that \code{sndt} itself is weakly identified at typical trial numbers: its
+value lies in de-biasing the other parameters, not in substantive
+interpretation. Estimating it population-level only (\code{sndt ~ 1}, no random
+effects) and checking prior sensitivity is recommended, since the prior
+acts as the effective regularizer.
+
+For the \code{"crisk"} version with \code{sndt > 0}, the two accumulators receive
+independent non-decision-time draws (a race between total finishing times)
+rather than one shared draw per trial. The two formulations agree exactly
+on choice probabilities at \code{zr = 0.5}, where the second-order term cancels
+by symmetry. Away from an unbiased starting point they diverge: at
+\code{sndt = 0.3} the densities differ by up to ~10\% and the choice
+probabilities by up to ~1 percentage point, growing to ~4 percentage
+points at \code{zr = 0.2}. Note also that \code{posterior_predict()} simulates
+through \code{\link[rtdists:rdiffusion]{rtdists::rdiffusion()}}, which uses the \emph{shared} draw, so
+\code{pp_check()} compares the data against a slightly different model than the
+one that was fitted whenever \code{zr} departs from 0.5.
+}
+
+\section{Estimating \code{sndt} in the "crisk" version at substantial error rates}{
+
+
+The crisk model treats the two response options as independent racing
+accumulators, which only \emph{approximates} a single Wiener diffusion process:
+the approximation is excellent when one boundary dominates (few errors) but
+imperfect when error rates are substantial. A freed \code{sndt} hands the model
+a flexible direction along which it can absorb this approximation error
+rather than genuine non-decision-time variability: in simulations with
+diffusion-generated data at 10-17\% errors (true \code{bound} 1.6, \code{sndt} 0.2),
+the crisk fit converged to \code{bound} ~1.2 and \code{sndt} ~0.4 even with very
+large samples, while the same likelihood recovered data from its own racing
+process without bias. A shared (rather than independent) non-decision-time
+formulation yields the same estimates, so this is a property of the crisk
+approximation itself. Options:
+\itemize{
+\item At low error rates (roughly below 10\%), use the \code{"simple"}
+version: the censored shifted Wald is then an excellent approximation
+of the diffusion process and \code{sndt} recovery is unbiased.
+\item At substantial error rates, when the data plausibly stem from a
+single diffusion process, prefer the \code{ddm} model (exact two-boundary
+likelihood, currently without non-decision-time variability), or keep
+\code{sndt} fixed at 0 in the crisk fit -- without the extra flexibility the
+crisk estimates stay close to the diffusion values.
+\item Fixing \code{sndt} at a plausible nonzero value (e.g.
+\code{bmf(..., sndt = 0.1)}) bounds its influence while still allowing the
+mean non-decision time to exceed the fastest response time.
+\item Treat a freed \code{sndt} that comes out much larger -- together with a
+much smaller \code{bound} -- than in a fit with \code{sndt} fixed (or than a
+\code{ddm} fit) as the signature of approximation-error absorption, and
+validate with posterior-predictive checks (\code{pp_check()}) before
+interpreting the parameters.
+}
+}
+
 \examples{
 \dontshow{if (isTRUE(Sys.getenv("BMM_EXAMPLES"))) withAutoprint(\{ # examplesIf}
 # generate simulated data from the diffusion model

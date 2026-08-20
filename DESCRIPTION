@@ -53,6 +53,7 @@ Suggests:
     remotes,
     rmarkdown,
     rstan,
+    statmod,
     stringr,
     testthat (>= 3.0.0),
     tidybayes,
